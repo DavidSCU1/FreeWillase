@@ -1,0 +1,20 @@
+# FreeWillase Configuration Example
+# Copy this to application.properties if you want to override defaults
+
+spring.application.name=freewillase-backend
+server.port=8081
+
+# MySQL Configuration
+# If using Docker Compose, these defaults should work
+DB_URL=jdbc:mysql://localhost:3306/freewillase?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+DB_USERNAME=root
+DB_PASSWORD=root
+
+# JWT Configuration
+# Change this to a random long string for production
+JWT_SECRET=your_random_secret_here
+
+# App Specific
+app.frontend-origin=http://localhost:5173
+app.ncbi.base-url=https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+app.ncbi.tool=freewillase

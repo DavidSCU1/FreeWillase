@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --apple-bg: #F5F5F7;
+  --apple-text: #1D1D1F;
+  --apple-secondary-text: #86868B;
+  --apple-border: rgba(0, 0, 0, 0.1);
+  --apple-card-bg: rgba(255, 255, 255, 0.8);
+  
+  color-scheme: light;
+  font-family: 'SF Pro Display', 'PingFang SC', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark {
+  --apple-bg: #000000;
+  --apple-text: #F5F5F7;
+  --apple-secondary-text: #86868B;
+  --apple-border: rgba(255, 255, 255, 0.1);
+  --apple-card-bg: rgba(28, 28, 30, 0.8);
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--apple-bg);
+  color: var(--apple-text);
+  overflow-x: hidden;
+}
+
+@layer components {
+  .apple-glass {
+    @apply backdrop-blur-md border border-white/20 dark:border-white/10;
+    background: var(--apple-card-bg);
+  }
+
+  .apple-card {
+    @apply rounded-apple-xl shadow-apple transition-all duration-300 hover:shadow-apple-hover;
+    background: var(--apple-card-bg);
+  }
+
+  .apple-button-primary {
+    @apply px-6 py-2.5 rounded-full bg-apple-blue text-white font-medium transition-all active:scale-95 hover:opacity-90;
+  }
+
+  .apple-button-secondary {
+    @apply px-6 py-2.5 rounded-full bg-white/10 dark:bg-white/5 border border-black/5 dark:border-white/10 font-medium transition-all active:scale-95 hover:bg-black/5 dark:hover:bg-white/10;
+  }
+
+  .apple-input {
+    @apply w-full px-4 py-3 rounded-apple bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 outline-none transition-all focus:border-apple-blue focus:ring-1 focus:ring-apple-blue;
+  }
+}
+
+/* 隐藏滚动条但保留功能 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
