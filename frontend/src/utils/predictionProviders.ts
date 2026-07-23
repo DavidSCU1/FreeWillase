@@ -14,6 +14,7 @@ const DEFAULT_BASE_URL: Record<Exclude<PredictionConfig['provider'], 'minifold'>
 const BIOHUB_MODELS = ['esmfold2-fast-2026-05', 'esmfold2-2026-05', 'esm3-open-2024-03'] as const
 const NVIDIA_MODELS = ['esmfold'] as const
 const CHAI1_MODELS = ['chai1'] as const
+const MINIFOLD_MODELS = ['MiniFold-v1 (Ark Hybrid)'] as const
 
 const SEQUENCE_RULES = {
   protein: {
@@ -37,6 +38,7 @@ export function getSupportedModels(provider: PredictionConfig['provider']): stri
   if (provider === 'biohub') return [...BIOHUB_MODELS]
   if (provider === 'nvidia') return [...NVIDIA_MODELS]
   if (provider === 'chai1') return [...CHAI1_MODELS]
+  if (provider === 'minifold') return [...MINIFOLD_MODELS]
   return []
 }
 
@@ -257,8 +259,6 @@ async function requestWithGuidance(
 }
 
 export async function predictStructure(config: PredictionConfig, request: PredictionRequest): Promise<PredictionResult> {
-  if (config.provider === 'minifold') throw new Error('MiniFold 已预留接口，你无需操作')
-
   assertApiKey(config)
   if (!request.name?.trim()) throw new Error('请填写名称')
   if (!request.type) throw new Error('请选择分子类型')
@@ -388,6 +388,36 @@ export async function predictStructure(config: PredictionConfig, request: Predic
       format: 'mmcif',
       structure: cif,
       plddt: body.items?.[0]?.outputs?.avg_plddt,
+    }
+  }
+
+  if (config.provider === 'minifold') {
+    const baseUrl = pickBaseUrl(config)
+    const response = await fetch(`${baseUrl}/minifold`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`, // Use backend auth
+      },
+      body: JSON.stringify({
+        sequence: normalizedSequence,
+        apiKey: config.apiKey.trim(), // This is the Volcano API key
+        envText: '', // Can be extended later
+      }),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`MiniFold 预测失败: ${errorText}`)
+    }
+
+    const body = await response.json()
+    return {
+      providerName: 'MiniFold-v1',
+      modelName: 'Ark Hybrid',
+      format: 'pdb',
+      structure: body.pdb,
+      analysis: body.analysis,
     }
   }
 
