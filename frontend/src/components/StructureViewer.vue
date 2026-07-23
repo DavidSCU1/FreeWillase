@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Viewer } from 'molstar/lib/apps/viewer/app'
+import { createPluginUI } from 'molstar/lib/mol-plugin-ui'
+import { renderReact18 } from 'molstar/lib/mol-plugin-ui/react18'
+import { DefaultPluginUISpec } from 'molstar/lib/mol-plugin-ui/spec'
+import type { PluginUIContext } from 'molstar/lib/mol-plugin-ui/context'
+import * as loaders from 'molstar/lib/extensions/plugin/loaders'
 
 import 'molstar/build/viewer/molstar.css'
 
@@ -15,46 +19,57 @@ const parentRef = ref<HTMLDivElement | null>(null)
 const isLoading = ref(false)
 const hasError = ref(false)
 const errorMessage = ref('')
-let viewer: Viewer | null = null
+let plugin: PluginUIContext | null = null
 
 const hasStructureSource = () => Boolean(props.pdbId || props.url)
 
 const disposeViewer = () => {
-  if (viewer) {
-    viewer.dispose()
-    viewer = null
+  if (plugin) {
+    plugin.dispose()
+    plugin = null
   }
 }
 
 const initViewer = async () => {
-  if (!parentRef.value || viewer || !hasStructureSource()) return
+  if (!parentRef.value || plugin || !hasStructureSource()) return
 
   await nextTick()
 
   try {
-    const scrollX = window.scrollX
-    const scrollY = window.scrollY
+    const spec = DefaultPluginUISpec()
+    spec.components = {
+      ...spec.components,
+      controls: {
+        top: 'none',
+        left: 'none',
+        right: 'none',
+        bottom: 'none'
+      },
+      remoteState: 'none',
+      hideTaskOverlay: true,
+      disableDragOverlay: true
+    }
+    spec.layout = {
+      initial: {
+        isExpanded: false,
+        showControls: false,
+        controlsDisplay: 'reactive',
+        regionState: {
+          top: 'hidden',
+          left: 'hidden',
+          right: 'hidden',
+          bottom: 'hidden'
+        }
+      }
+    }
 
-    viewer = await Viewer.create(parentRef.value, {
-      layoutShowControls: false,
-      layoutShowRemoteState: false,
-      layoutShowSequence: false,
-      layoutShowLog: false,
-      viewportShowAnimation: false,
-      viewportShowExpand: false,
-      viewportShowSelectionMode: false,
-      viewportShowControls: true,
-      viewportBackgroundColor: 'white'
+    plugin = await createPluginUI({
+      target: parentRef.value,
+      render: renderReact18,
+      spec
     })
 
     await reloadStructure()
-
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: scrollY, left: scrollX, behavior: 'auto' })
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur()
-      }
-    })
   } catch (err) {
     console.error('Molstar init error:', err)
     hasError.value = true
@@ -67,8 +82,8 @@ const normalizeSourceDb = (value?: string) => (value || '').trim().toUpperCase()
 const shouldLoadFromUrl = () => Boolean(props.url) && !['PDB', 'ALPHAFOLD', 'ALPHAFOLDDB'].includes(normalizeSourceDb(props.sourceDb))
 
 const clearViewer = async () => {
-  if (!viewer) return
-  await viewer.plugin.clear()
+  if (!plugin) return
+  await plugin.clear()
 }
 
 const reloadStructure = async () => {
@@ -84,7 +99,7 @@ const reloadStructure = async () => {
 }
 
 const loadStructure = async (id: string, sourceDb?: string) => {
-  if (!viewer) return
+  if (!plugin) return
   isLoading.value = true
   hasError.value = false
   errorMessage.value = ''
@@ -94,21 +109,21 @@ const loadStructure = async (id: string, sourceDb?: string) => {
     await clearViewer()
 
     if (normalizedSourceDb === 'PDB') {
-      await viewer.loadPdb(id.toUpperCase())
+      await loaders.loadPdb(plugin, id.toUpperCase())
       return
     }
 
     if (normalizedSourceDb === 'ALPHAFOLD' || normalizedSourceDb === 'ALPHAFOLDDB') {
-      await viewer.loadAlphaFoldDb(id)
+      await loaders.loadAlphaFoldDb(plugin, id)
       return
     }
 
     try {
-      await viewer.loadPdb(id.toUpperCase())
+      await loaders.loadPdb(plugin, id.toUpperCase())
     } catch (pdbErr) {
       console.warn(`PDB ${id} not found, trying AlphaFold...`)
       try {
-        await viewer.loadAlphaFoldDb(id)
+        await loaders.loadAlphaFoldDb(plugin, id)
       } catch (afErr) {
         hasError.value = true
         errorMessage.value = '看来这只酶很有“自由意志”'
@@ -124,7 +139,7 @@ const loadStructure = async (id: string, sourceDb?: string) => {
 }
 
 const loadByUrl = async (url: string) => {
-  if (!viewer) return
+  if (!plugin) return
   isLoading.value = true
   hasError.value = false
   errorMessage.value = ''
@@ -132,7 +147,7 @@ const loadByUrl = async (url: string) => {
     await clearViewer()
     const normalizedUrl = url.toLowerCase()
     const isBinary = normalizedUrl.endsWith('.bcif')
-    await viewer.loadStructureFromUrl(url, props.format || 'pdb', isBinary)
+    await loaders.loadStructureFromUrl(plugin, url, props.format || 'pdb', isBinary)
   } catch (e) {
     console.error('URL structure loading error:', e)
     hasError.value = true
@@ -143,33 +158,33 @@ const loadByUrl = async (url: string) => {
 }
 
 watch(() => props.pdbId, async (newId) => {
-  if (newId && !viewer) {
+  if (newId && !plugin) {
     await initViewer()
     return
   }
-  if (newId && viewer && !shouldLoadFromUrl()) await loadStructure(newId, props.sourceDb)
+  if (newId && plugin && !shouldLoadFromUrl()) await loadStructure(newId, props.sourceDb)
   if (!newId && !props.url) {
     disposeViewer()
   }
 })
 
 watch(() => props.url, async (newUrl) => {
-  if (newUrl && !viewer) {
+  if (newUrl && !plugin) {
     await initViewer()
     return
   }
-  if (newUrl && viewer && shouldLoadFromUrl()) await loadByUrl(newUrl)
+  if (newUrl && plugin && shouldLoadFromUrl()) await loadByUrl(newUrl)
   if (!newUrl && !props.pdbId) {
     disposeViewer()
   }
 })
 
 watch(() => props.format, async () => {
-  if (props.url && viewer && shouldLoadFromUrl()) await loadByUrl(props.url)
+  if (props.url && plugin && shouldLoadFromUrl()) await loadByUrl(props.url)
 })
 
 watch(() => props.sourceDb, async () => {
-  if (!viewer) return
+  if (!plugin) return
   await reloadStructure()
 })
 
@@ -217,10 +232,20 @@ onUnmounted(() => {
 <style>
 /* Style the container and handle canvas properly */
 .molstar-viewer-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.molstar-viewer-container .msp-plugin {
   width: 100%;
   height: 100%;
 }
-.molstar-viewer-container :deep(.msp-plugin) {
+.molstar-viewer-container .msp-plugin-content,
+.molstar-viewer-container .msp-layout-region,
+.molstar-viewer-container .msp-layout-static,
+.molstar-viewer-container .msp-viewport,
+.molstar-viewer-container .msp-viewport-area {
   width: 100%;
   height: 100%;
 }
