@@ -1,16 +1,21 @@
 package com.freewillase.backend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.freewillase.backend.domain.EnzymeCrossRef;
 import com.freewillase.backend.domain.EnzymeEntry;
+import com.freewillase.backend.domain.EnzymeSequence;
+import com.freewillase.backend.domain.EnzymeStructure;
 import com.freewillase.backend.domain.NcbiImportTask;
 import com.freewillase.backend.domain.NcbiImportTaskItem;
 import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportTaskItemResponse;
 import com.freewillase.backend.dto.ImportTaskResponse;
+import com.freewillase.backend.mapper.EnzymeCrossRefMapper;
 import com.freewillase.backend.mapper.EnzymeEntryMapper;
+import com.freewillase.backend.mapper.EnzymeSequenceMapper;
+import com.freewillase.backend.mapper.EnzymeStructureMapper;
 import com.freewillase.backend.mapper.NcbiImportTaskItemMapper;
 import com.freewillase.backend.mapper.NcbiImportTaskMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -22,8 +27,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -32,7 +39,10 @@ import java.util.stream.Collectors;
 public class NcbiImportService {
 
     private final NcbiEutilsClient ncbiEutilsClient;
+    private final EnzymeCrossRefMapper enzymeCrossRefMapper;
     private final EnzymeEntryMapper enzymeEntryMapper;
+    private final EnzymeSequenceMapper enzymeSequenceMapper;
+    private final EnzymeStructureMapper enzymeStructureMapper;
     private final NcbiImportTaskMapper taskMapper;
     private final NcbiImportTaskItemMapper taskItemMapper;
     private final com.freewillase.backend.mapper.LiteratureRelationMapper relationMapper;
@@ -43,12 +53,18 @@ public class NcbiImportService {
 
     public NcbiImportService(
             NcbiEutilsClient ncbiEutilsClient,
+            EnzymeCrossRefMapper enzymeCrossRefMapper,
             EnzymeEntryMapper enzymeEntryMapper,
+            EnzymeSequenceMapper enzymeSequenceMapper,
+            EnzymeStructureMapper enzymeStructureMapper,
             NcbiImportTaskMapper taskMapper,
             NcbiImportTaskItemMapper taskItemMapper,
             com.freewillase.backend.mapper.LiteratureRelationMapper relationMapper) {
         this.ncbiEutilsClient = ncbiEutilsClient;
+        this.enzymeCrossRefMapper = enzymeCrossRefMapper;
         this.enzymeEntryMapper = enzymeEntryMapper;
+        this.enzymeSequenceMapper = enzymeSequenceMapper;
+        this.enzymeStructureMapper = enzymeStructureMapper;
         this.taskMapper = taskMapper;
         this.taskItemMapper = taskItemMapper;
         this.relationMapper = relationMapper;
@@ -108,13 +124,20 @@ public class NcbiImportService {
                         .name(result.getTitle())
                         .organism(result.getOrganism())
                         .taxId(result.getTaxId())
-                        .sequenceLength(result.getSequenceLength())
-                        .sequenceHash(calculateHash(result.getSequence()))
                         .status("ACTIVE")
                         .createdAt(LocalDateTime.now())
                         .updatedAt(LocalDateTime.now())
                         .build();
                 enzymeEntryMapper.insert(entry);
+                savePrimarySequence(entry.getId(), result.getSequence(), result.getSequenceLength(), "NCBI");
+                saveCrossReference(
+                        entry.getId(),
+                        "NCBI",
+                        "PROTEIN_ACCESSION",
+                        result.getAccession(),
+                        buildNcbiProteinUrl(result.getAccession()),
+                        1
+                );
 
                 successCount++;
                 saveTaskItem(task.getId(), entry.getProteinAccession(), "SUCCESS", "已从 NCBI 补全并写入数据库", entry.getId());
@@ -172,19 +195,42 @@ public class NcbiImportService {
     }
 
     public List<EnzymeEntryResponse> listEnzymes() {
-        return enzymeEntryMapper.selectList(new LambdaQueryWrapper<EnzymeEntry>()
-                .orderByDesc(EnzymeEntry::getCreatedAt))
+        List<EnzymeEntry> entries = enzymeEntryMapper.selectList(new LambdaQueryWrapper<EnzymeEntry>()
+                .orderByDesc(EnzymeEntry::getCreatedAt));
+        Map<Long, EnzymeSequence> primarySequences = loadPrimarySequences(entries);
+        Map<Long, EnzymeStructure> primaryStructures = loadPrimaryStructures(entries);
+        Map<Long, Map<String, EnzymeCrossRef>> primaryCrossRefs = loadPrimaryCrossRefs(entries);
+
+        return entries
                 .stream()
-                .map(entry -> EnzymeEntryResponse.builder()
-                        .id(entry.getId())
-                        .accession(entry.getProteinAccession())
-                        .proteinName(entry.getName())
-                        .organismName(entry.getOrganism())
-                        .taxId(entry.getTaxId())
-                        .sequenceLength(entry.getSequenceLength())
-                        .sequenceHash(entry.getSequenceHash())
-                        .createdAt(entry.getCreatedAt())
-                        .build())
+                .map(entry -> {
+                    EnzymeStructure primaryStructure = primaryStructures.get(entry.getId());
+                    Map<String, EnzymeCrossRef> refs = primaryCrossRefs.getOrDefault(entry.getId(), Collections.emptyMap());
+                    EnzymeCrossRef ncbiRef = refs.get("NCBI");
+                    EnzymeCrossRef uniprotRef = refs.get("UNIPROT");
+                    EnzymeCrossRef pdbRef = refs.get("PDB");
+
+                    return EnzymeEntryResponse.builder()
+                            .id(entry.getId())
+                            .accession(entry.getProteinAccession())
+                            .proteinName(entry.getName())
+                            .organismName(entry.getOrganism())
+                            .taxId(entry.getTaxId())
+                            .sequenceLength(readSequenceLength(primarySequences.get(entry.getId())))
+                            .sequenceHash(readSequenceHash(primarySequences.get(entry.getId())))
+                            .structureType(readStructureType(primaryStructure))
+                            .structureId(readStructureId(primaryStructure))
+                            .structureSourceDb(readStructureSourceDb(primaryStructure))
+                            .structureUrl(readStructureUrl(primaryStructure))
+                            .ncbiProteinAccession(readCrossRefValue(ncbiRef))
+                            .ncbiProteinUrl(readCrossRefUrl(ncbiRef))
+                            .uniprotAccession(readCrossRefValue(uniprotRef))
+                            .uniprotUrl(readCrossRefUrl(uniprotRef))
+                            .pdbId(readPdbId(pdbRef, primaryStructure))
+                            .pdbUrl(readPdbUrl(pdbRef, primaryStructure))
+                            .createdAt(entry.getCreatedAt())
+                            .build();
+                })
                 .collect(Collectors.toList());
     }
 
@@ -193,11 +239,193 @@ public class NcbiImportService {
         // 1. Delete literature relations
         relationMapper.delete(new LambdaQueryWrapper<com.freewillase.backend.domain.LiteratureRelation>()
                 .eq(com.freewillase.backend.domain.LiteratureRelation::getEnzymeId, id));
-        
-        // 2. Delete enzyme entry
+
+        // 2. Delete related sequences
+        enzymeSequenceMapper.delete(new LambdaQueryWrapper<EnzymeSequence>()
+                .eq(EnzymeSequence::getEnzymeId, id));
+
+        // 3. Delete related structures
+        enzymeStructureMapper.delete(new LambdaQueryWrapper<EnzymeStructure>()
+                .eq(EnzymeStructure::getEnzymeId, id));
+
+        // 4. Delete cross references
+        enzymeCrossRefMapper.delete(new LambdaQueryWrapper<EnzymeCrossRef>()
+                .eq(EnzymeCrossRef::getEnzymeId, id));
+
+        // 5. Delete enzyme entry
         enzymeEntryMapper.deleteById(id);
-        
+
         log.info("Deleted enzyme entry and related data for ID: {}", id);
+    }
+
+    private void savePrimarySequence(Long enzymeId, String sequence, int sequenceLength, String sourceType) {
+        EnzymeSequence enzymeSequence = EnzymeSequence.builder()
+                .enzymeId(enzymeId)
+                .versionNo(1)
+                .sequenceText(sequence == null ? "" : sequence)
+                .sequenceLength(sequenceLength)
+                .sequenceHash(calculateHash(sequence))
+                .isPrimary(1)
+                .sourceType(sourceType)
+                .createdAt(LocalDateTime.now())
+                .build();
+        enzymeSequenceMapper.insert(enzymeSequence);
+    }
+
+    private Map<Long, EnzymeSequence> loadPrimarySequences(List<EnzymeEntry> entries) {
+        if (entries.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> enzymeIds = entries.stream()
+                .map(EnzymeEntry::getId)
+                .collect(Collectors.toList());
+
+        List<EnzymeSequence> sequences = enzymeSequenceMapper.selectList(new LambdaQueryWrapper<EnzymeSequence>()
+                .in(EnzymeSequence::getEnzymeId, enzymeIds)
+                .eq(EnzymeSequence::getIsPrimary, 1)
+                .orderByDesc(EnzymeSequence::getVersionNo));
+
+        Map<Long, EnzymeSequence> primarySequences = new HashMap<>();
+        for (EnzymeSequence sequence : sequences) {
+            primarySequences.putIfAbsent(sequence.getEnzymeId(), sequence);
+        }
+        return primarySequences;
+    }
+
+    private Map<Long, EnzymeStructure> loadPrimaryStructures(List<EnzymeEntry> entries) {
+        if (entries.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> enzymeIds = entries.stream()
+                .map(EnzymeEntry::getId)
+                .collect(Collectors.toList());
+
+        List<EnzymeStructure> structures = enzymeStructureMapper.selectList(new LambdaQueryWrapper<EnzymeStructure>()
+                .in(EnzymeStructure::getEnzymeId, enzymeIds)
+                .orderByDesc(EnzymeStructure::getIsPrimary)
+                .orderByDesc(EnzymeStructure::getCreatedAt));
+
+        Map<Long, EnzymeStructure> primaryStructures = new HashMap<>();
+        for (EnzymeStructure structure : structures) {
+            primaryStructures.putIfAbsent(structure.getEnzymeId(), structure);
+        }
+        return primaryStructures;
+    }
+
+    private Map<Long, Map<String, EnzymeCrossRef>> loadPrimaryCrossRefs(List<EnzymeEntry> entries) {
+        if (entries.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> enzymeIds = entries.stream()
+                .map(EnzymeEntry::getId)
+                .collect(Collectors.toList());
+
+        List<EnzymeCrossRef> refs = enzymeCrossRefMapper.selectList(new LambdaQueryWrapper<EnzymeCrossRef>()
+                .in(EnzymeCrossRef::getEnzymeId, enzymeIds)
+                .orderByDesc(EnzymeCrossRef::getIsPrimary)
+                .orderByDesc(EnzymeCrossRef::getCreatedAt));
+
+        Map<Long, Map<String, EnzymeCrossRef>> groupedRefs = new HashMap<>();
+        for (EnzymeCrossRef ref : refs) {
+            groupedRefs
+                    .computeIfAbsent(ref.getEnzymeId(), key -> new HashMap<>())
+                    .putIfAbsent(ref.getRefDb(), ref);
+        }
+        return groupedRefs;
+    }
+
+    private Integer readSequenceLength(EnzymeSequence sequence) {
+        return sequence == null ? 0 : sequence.getSequenceLength();
+    }
+
+    private String readSequenceHash(EnzymeSequence sequence) {
+        return sequence == null ? "-" : sequence.getSequenceHash();
+    }
+
+    private String readStructureType(EnzymeStructure structure) {
+        return structure == null ? null : structure.getStructureType();
+    }
+
+    private String readStructureId(EnzymeStructure structure) {
+        return structure == null ? null : structure.getStructureId();
+    }
+
+    private String readStructureSourceDb(EnzymeStructure structure) {
+        return structure == null ? null : structure.getSourceDb();
+    }
+
+    private String readStructureUrl(EnzymeStructure structure) {
+        return structure == null ? null : structure.getSourceUrl();
+    }
+
+    private String readCrossRefValue(EnzymeCrossRef ref) {
+        return ref == null ? null : ref.getRefValue();
+    }
+
+    private String readCrossRefUrl(EnzymeCrossRef ref) {
+        return ref == null ? null : ref.getRefUrl();
+    }
+
+    private String readPdbId(EnzymeCrossRef pdbRef, EnzymeStructure structure) {
+        if (pdbRef != null) {
+            return pdbRef.getRefValue();
+        }
+        if (structure != null && "PDB".equalsIgnoreCase(structure.getSourceDb())) {
+            return structure.getStructureId();
+        }
+        return null;
+    }
+
+    private String readPdbUrl(EnzymeCrossRef pdbRef, EnzymeStructure structure) {
+        if (pdbRef != null) {
+            return pdbRef.getRefUrl();
+        }
+        if (structure != null && "PDB".equalsIgnoreCase(structure.getSourceDb()) && structure.getStructureId() != null) {
+            return buildPdbUrl(structure.getStructureId());
+        }
+        return null;
+    }
+
+    private void saveCrossReference(Long enzymeId, String refDb, String refType, String refValue, String refUrl, int isPrimary) {
+        if (refValue == null || refValue.isBlank()) {
+            return;
+        }
+
+        EnzymeCrossRef existing = enzymeCrossRefMapper.selectOne(new LambdaQueryWrapper<EnzymeCrossRef>()
+                .eq(EnzymeCrossRef::getEnzymeId, enzymeId)
+                .eq(EnzymeCrossRef::getRefDb, refDb)
+                .eq(EnzymeCrossRef::getRefType, refType)
+                .eq(EnzymeCrossRef::getRefValue, refValue)
+                .last("LIMIT 1"));
+        if (existing != null) {
+            return;
+        }
+
+        EnzymeCrossRef crossRef = EnzymeCrossRef.builder()
+                .enzymeId(enzymeId)
+                .refDb(refDb)
+                .refType(refType)
+                .refValue(refValue)
+                .refUrl(refUrl)
+                .isPrimary(isPrimary)
+                .createdAt(LocalDateTime.now())
+                .build();
+        enzymeCrossRefMapper.insert(crossRef);
+    }
+
+    private String buildNcbiProteinUrl(String accession) {
+        return accession == null || accession.isBlank()
+                ? null
+                : "https://www.ncbi.nlm.nih.gov/protein/" + accession;
+    }
+
+    private String buildPdbUrl(String pdbId) {
+        return pdbId == null || pdbId.isBlank()
+                ? null
+                : "https://www.rcsb.org/structure/" + pdbId;
     }
 
     private ImportTaskResponse toTaskResponse(NcbiImportTask task, List<NcbiImportTaskItem> items) {

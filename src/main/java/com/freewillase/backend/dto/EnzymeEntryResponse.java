@@ -15,5 +15,15 @@ public class EnzymeEntryResponse {
     String taxId;
     Integer sequenceLength;
     String sequenceHash;
+    String structureType;
+    String structureId;
+    String structureSourceDb;
+    String structureUrl;
+    String ncbiProteinAccession;
+    String ncbiProteinUrl;
+    String uniprotAccession;
+    String uniprotUrl;
+    String pdbId;
+    String pdbUrl;
     LocalDateTime createdAt;
 }

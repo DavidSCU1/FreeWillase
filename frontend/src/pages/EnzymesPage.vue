@@ -46,12 +46,6 @@ async function handleAutoMatch() {
   await fetchEnzymeLiteratures(selectedId.value)
 }
 
-// Mock PDB mapping for demonstration
-const pdbMapping: Record<string, string> = {
-  'WP_010248927.1': '1A8L', // Example PDB
-  'NP_001092.1': '1ATN',    // Actin
-}
-
 const filteredEnzymes = computed(() => {
   if (!searchQuery.value) return enzymes.value
   const q = searchQuery.value.toLowerCase()
@@ -67,6 +61,45 @@ const selectedEnzyme = computed(() => {
   if (selectedId.value == null) return enzymes.value[0]
   return enzymes.value.find((item) => item.id === selectedId.value) ?? enzymes.value[0]
 })
+
+const selectedStructureId = computed(() => {
+  const enzyme = selectedEnzyme.value
+  if (!enzyme) return ''
+  return enzyme.structureId || enzyme.accession
+})
+
+const selectedStructureUrl = computed(() => {
+  const enzyme = selectedEnzyme.value
+  if (!enzyme?.structureUrl || enzyme.structureId) return undefined
+  return enzyme.structureUrl
+})
+
+const selectedStructureSource = computed(() => {
+  const enzyme = selectedEnzyme.value
+  return enzyme?.structureSourceDb || 'AUTO'
+})
+
+const selectedStructureType = computed(() => {
+  const enzyme = selectedEnzyme.value
+  return enzyme?.structureType || 'AUTO'
+})
+
+const selectedStructureStatus = computed(() => {
+  const enzyme = selectedEnzyme.value
+  if (!enzyme) return 'Auto-Retrieved'
+  if (enzyme.structureSourceDb === 'PDB') return 'Experimental (PDB)'
+  if (enzyme.structureSourceDb === 'AlphaFold') return 'Predicted (AlphaFold)'
+  if (enzyme.structureSourceDb) return `Curated (${enzyme.structureSourceDb})`
+  return 'Auto-Retrieved'
+})
+
+const selectedNcbiUrl = computed(() => {
+  const enzyme = selectedEnzyme.value
+  if (!enzyme) return undefined
+  return enzyme.ncbiProteinUrl || (enzyme.accession ? `https://www.ncbi.nlm.nih.gov/protein/${enzyme.accession}` : undefined)
+})
+
+const selectedUniprotUrl = computed(() => selectedEnzyme.value?.uniprotUrl)
 
 watch(
   () => selectedId.value,
@@ -212,10 +245,16 @@ onMounted(async () => {
                 <Trash2 v-else :size="14" />
                 删除条目
               </button>
-              <button class="apple-button-secondary flex items-center gap-2 !py-2 !px-4 text-xs">
+              <a
+                v-if="selectedNcbiUrl"
+                :href="selectedNcbiUrl"
+                target="_blank"
+                rel="noreferrer"
+                class="apple-button-secondary flex items-center gap-2 !py-2 !px-4 text-xs"
+              >
                 <ExternalLink :size="14" />
                 NCBI 详情
-              </button>
+              </a>
             </div>
           </div>
 
@@ -241,6 +280,60 @@ onMounted(async () => {
               </div>
               <p class="text-xs font-mono text-apple-secondary-text truncate">{{ selectedEnzyme.sequenceHash }}</p>
             </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
+              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
+                <Database :size="14" />
+                <span class="text-[10px] font-bold uppercase tracking-widest">NCBI</span>
+              </div>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.ncbiProteinAccession || selectedEnzyme.accession }}</p>
+            </div>
+            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
+              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
+                <Tag :size="14" />
+                <span class="text-[10px] font-bold uppercase tracking-widest">UniProt</span>
+              </div>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.uniprotAccession || '-' }}</p>
+            </div>
+            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
+              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
+                <Dna :size="14" />
+                <span class="text-[10px] font-bold uppercase tracking-widest">PDB</span>
+              </div>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.pdbId || selectedEnzyme.structureId || '-' }}</p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-3 mt-6">
+            <a
+              v-if="selectedNcbiUrl"
+              :href="selectedNcbiUrl"
+              target="_blank"
+              rel="noreferrer"
+              class="text-xs font-semibold text-apple-blue hover:underline"
+            >
+              查看 NCBI 页面
+            </a>
+            <a
+              v-if="selectedUniprotUrl"
+              :href="selectedUniprotUrl"
+              target="_blank"
+              rel="noreferrer"
+              class="text-xs font-semibold text-apple-blue hover:underline"
+            >
+              查看 UniProt 页面
+            </a>
+            <a
+              v-if="selectedEnzyme.pdbUrl"
+              :href="selectedEnzyme.pdbUrl"
+              target="_blank"
+              rel="noreferrer"
+              class="text-xs font-semibold text-apple-blue hover:underline"
+            >
+              查看 PDB 页面
+            </a>
           </div>
         </div>
 
@@ -268,21 +361,22 @@ onMounted(async () => {
             
             <div class="flex-1 min-h-[400px] relative group/viewer">
               <StructureViewer 
-                :pdb-id="pdbMapping[selectedEnzyme.accession] || selectedEnzyme.accession" 
+                :pdb-id="selectedStructureId"
+                :url="selectedStructureUrl"
               />
               
               <div class="absolute top-4 left-4 flex flex-col gap-2">
                 <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
-                  {{ pdbMapping[selectedEnzyme.accession] ? 'Experimental (PDB)' : 'Auto-Retrieved' }}
+                  {{ selectedStructureStatus }}
                 </div>
               </div>
 
               <div class="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
                 <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
-                  ID: {{ pdbMapping[selectedEnzyme.accession] || selectedEnzyme.accession }}
+                  ID: {{ selectedStructureId }}
                 </div>
                 <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
-                  Cartoon Mode
+                  {{ selectedStructureType }}
                 </div>
               </div>
             </div>
@@ -290,11 +384,11 @@ onMounted(async () => {
             <div class="mt-4 grid grid-cols-2 gap-3">
               <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
                 <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Source</p>
-                <p class="text-xs font-bold text-apple-text">RCSB PDB</p>
+                <p class="text-xs font-bold text-apple-text">{{ selectedStructureSource }}</p>
               </div>
               <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-                <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Resolution</p>
-                <p class="text-xs font-bold text-apple-text">2.10 Å</p>
+                <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Structure ID</p>
+                <p class="text-xs font-bold text-apple-text truncate">{{ selectedStructureId }}</p>
               </div>
             </div>
           </div>
@@ -371,7 +465,7 @@ onMounted(async () => {
           <div class="flex items-center gap-4">
             <h3 class="text-white font-bold">{{ selectedEnzyme?.proteinName }}</h3>
             <span class="px-2 py-0.5 rounded-full bg-apple-blue text-white text-[10px] font-bold uppercase tracking-widest">
-              {{ pdbMapping[selectedEnzyme?.accession || ''] }}
+              {{ selectedStructureId }}
             </span>
           </div>
           <button 
@@ -384,7 +478,8 @@ onMounted(async () => {
         <div class="flex-1 p-8">
           <StructureViewer 
             v-if="selectedEnzyme"
-            :pdb-id="pdbMapping[selectedEnzyme.accession] || selectedEnzyme.accession" 
+            :pdb-id="selectedStructureId"
+            :url="selectedStructureUrl"
           />
         </div>
       </div>

@@ -26,5 +26,15 @@ export interface EnzymeEntry {
   taxId?: string
   sequenceLength: number
   sequenceHash: string
+  structureType?: string
+  structureId?: string
+  structureSourceDb?: string
+  structureUrl?: string
+  ncbiProteinAccession?: string
+  ncbiProteinUrl?: string
+  uniprotAccession?: string
+  uniprotUrl?: string
+  pdbId?: string
+  pdbUrl?: string
   createdAt: string
 }

@@ -30,8 +30,6 @@ public class EnzymeEntry {
     private String organism;
     private String substrate;
     private String product;
-    private Integer sequenceLength;
-    private String sequenceHash;
     private String optimalPh;
     private String optimalTemperature;
     private String description;
