@@ -17,12 +17,24 @@ const hasError = ref(false)
 const errorMessage = ref('')
 let viewer: Viewer | null = null
 
+const hasStructureSource = () => Boolean(props.pdbId || props.url)
+
+const disposeViewer = () => {
+  if (viewer) {
+    viewer.dispose()
+    viewer = null
+  }
+}
+
 const initViewer = async () => {
-  if (!parentRef.value) return
+  if (!parentRef.value || viewer || !hasStructureSource()) return
 
   await nextTick()
 
   try {
+    const scrollX = window.scrollX
+    const scrollY = window.scrollY
+
     viewer = await Viewer.create(parentRef.value, {
       layoutShowControls: false,
       layoutShowRemoteState: false,
@@ -36,6 +48,13 @@ const initViewer = async () => {
     })
 
     await reloadStructure()
+
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY, left: scrollX, behavior: 'auto' })
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur()
+      }
+    })
   } catch (err) {
     console.error('Molstar init error:', err)
     hasError.value = true
@@ -53,6 +72,10 @@ const clearViewer = async () => {
 }
 
 const reloadStructure = async () => {
+  if (!hasStructureSource()) {
+    await clearViewer()
+    return
+  }
   if (shouldLoadFromUrl() && props.url) {
     await loadByUrl(props.url)
   } else if (props.pdbId) {
@@ -120,11 +143,25 @@ const loadByUrl = async (url: string) => {
 }
 
 watch(() => props.pdbId, async (newId) => {
+  if (newId && !viewer) {
+    await initViewer()
+    return
+  }
   if (newId && viewer && !shouldLoadFromUrl()) await loadStructure(newId, props.sourceDb)
+  if (!newId && !props.url) {
+    disposeViewer()
+  }
 })
 
 watch(() => props.url, async (newUrl) => {
+  if (newUrl && !viewer) {
+    await initViewer()
+    return
+  }
   if (newUrl && viewer && shouldLoadFromUrl()) await loadByUrl(newUrl)
+  if (!newUrl && !props.pdbId) {
+    disposeViewer()
+  }
 })
 
 watch(() => props.format, async () => {
@@ -141,10 +178,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (viewer) {
-    viewer.dispose()
-    viewer = null
-  }
+  disposeViewer()
 })
 </script>
 

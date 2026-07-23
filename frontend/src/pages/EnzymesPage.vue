@@ -133,6 +133,7 @@ watch(
 
 onMounted(async () => {
   try {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
     await refreshEnzymeLibrary()
     if (selectedId.value) {
       fetchEnzymeLiteratures(selectedId.value)

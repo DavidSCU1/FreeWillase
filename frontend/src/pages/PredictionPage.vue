@@ -339,9 +339,24 @@ function downloadStructure() {
             </div>
 
             <StructureViewer
+              v-if="store.viewerUrl"
               :url="store.viewerUrl || undefined"
               :format="store.viewerFormat"
             />
+            <div
+              v-else
+              class="min-h-[400px] rounded-apple-lg border border-apple-border bg-white shadow-apple flex items-center justify-center"
+            >
+              <div class="text-center px-6">
+                <div class="w-12 h-12 rounded-full bg-apple-blue/10 text-apple-blue flex items-center justify-center mx-auto mb-3">
+                  <Microscope :size="24" />
+                </div>
+                <h4 class="text-xs font-bold text-apple-text mb-1 uppercase tracking-wider">等待预测结果</h4>
+                <p class="text-[10px] text-apple-secondary-text leading-relaxed max-w-[220px] mx-auto">
+                  提交一次结构预测后，这里会显示 PDB 或 mmCIF 的 3D 结果。
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
