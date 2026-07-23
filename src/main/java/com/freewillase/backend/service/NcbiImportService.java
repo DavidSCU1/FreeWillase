@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -39,6 +40,7 @@ import java.util.stream.Collectors;
 public class NcbiImportService {
 
     private final NcbiEutilsClient ncbiEutilsClient;
+    private final UniProtClient uniProtClient;
     private final EnzymeCrossRefMapper enzymeCrossRefMapper;
     private final EnzymeEntryMapper enzymeEntryMapper;
     private final EnzymeSequenceMapper enzymeSequenceMapper;
@@ -53,6 +55,7 @@ public class NcbiImportService {
 
     public NcbiImportService(
             NcbiEutilsClient ncbiEutilsClient,
+            UniProtClient uniProtClient,
             EnzymeCrossRefMapper enzymeCrossRefMapper,
             EnzymeEntryMapper enzymeEntryMapper,
             EnzymeSequenceMapper enzymeSequenceMapper,
@@ -61,6 +64,7 @@ public class NcbiImportService {
             NcbiImportTaskItemMapper taskItemMapper,
             com.freewillase.backend.mapper.LiteratureRelationMapper relationMapper) {
         this.ncbiEutilsClient = ncbiEutilsClient;
+        this.uniProtClient = uniProtClient;
         this.enzymeCrossRefMapper = enzymeCrossRefMapper;
         this.enzymeEntryMapper = enzymeEntryMapper;
         this.enzymeSequenceMapper = enzymeSequenceMapper;
@@ -116,14 +120,19 @@ public class NcbiImportService {
 
             try {
                 NcbiEutilsClient.ProteinLookupResult result = ncbiEutilsClient.fetchProteinByAccession(accession, email, apiKey);
+                Optional<UniProtClient.ProteinEnrichment> enrichment = loadUniProtEnrichment(result);
                 
                 // Create Enzyme Entry
                 EnzymeEntry entry = EnzymeEntry.builder()
                         .code("ENZ_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
                         .proteinAccession(result.getAccession())
+                        .proteinVersion(extractProteinVersion(result.getAccession()))
+                        .geneSymbol(enrichment.map(UniProtClient.ProteinEnrichment::getGeneSymbol).orElse(null))
                         .name(result.getTitle())
+                        .ecNumber(enrichment.map(UniProtClient.ProteinEnrichment::getEcNumber).orElse(null))
                         .organism(result.getOrganism())
                         .taxId(result.getTaxId())
+                        .description(enrichment.map(UniProtClient.ProteinEnrichment::getFunctionSummary).orElse(null))
                         .status("ACTIVE")
                         .createdAt(LocalDateTime.now())
                         .updatedAt(LocalDateTime.now())
@@ -138,9 +147,10 @@ public class NcbiImportService {
                         buildNcbiProteinUrl(result.getAccession()),
                         1
                 );
+                applyUniProtEnrichment(entry.getId(), enrichment);
 
                 successCount++;
-                saveTaskItem(task.getId(), entry.getProteinAccession(), "SUCCESS", "已从 NCBI 补全并写入数据库", entry.getId());
+                saveTaskItem(task.getId(), entry.getProteinAccession(), "SUCCESS", buildSuccessMessage(enrichment), entry.getId());
             } catch (Exception ex) {
                 log.error("Failed to import accession: {}", accession, ex);
                 failedCount++;
@@ -270,6 +280,89 @@ public class NcbiImportService {
                 .createdAt(LocalDateTime.now())
                 .build();
         enzymeSequenceMapper.insert(enzymeSequence);
+    }
+
+    private Optional<UniProtClient.ProteinEnrichment> loadUniProtEnrichment(NcbiEutilsClient.ProteinLookupResult result) {
+        try {
+            return uniProtClient.enrichByRefSeqAccession(result.getAccession(), result.getTaxId());
+        } catch (Exception ex) {
+            log.warn("UniProt enrichment failed for accession {}", result.getAccession(), ex);
+            return Optional.empty();
+        }
+    }
+
+    private void applyUniProtEnrichment(Long enzymeId, Optional<UniProtClient.ProteinEnrichment> enrichmentOptional) {
+        if (enrichmentOptional.isEmpty()) {
+            return;
+        }
+
+        UniProtClient.ProteinEnrichment enrichment = enrichmentOptional.get();
+        saveCrossReference(
+                enzymeId,
+                "UNIPROT",
+                "ACCESSION",
+                enrichment.getPrimaryAccession(),
+                buildUniProtUrl(enrichment.getPrimaryAccession()),
+                1
+        );
+
+        boolean hasPdb = !enrichment.getPdbIds().isEmpty();
+        if (hasPdb) {
+            String pdbId = enrichment.getPdbIds().get(0);
+            saveCrossReference(
+                    enzymeId,
+                    "PDB",
+                    "STRUCTURE_ID",
+                    pdbId,
+                    buildPdbUrl(pdbId),
+                    1
+            );
+            saveStructure(
+                    enzymeId,
+                    "EXPERIMENTAL",
+                    pdbId,
+                    "PDB",
+                    buildPdbUrl(pdbId),
+                    1
+            );
+        }
+
+        if (enrichment.getAlphaFoldAccession() != null && !enrichment.getAlphaFoldAccession().isBlank()) {
+            saveStructure(
+                    enzymeId,
+                    "PREDICTED",
+                    enrichment.getAlphaFoldAccession(),
+                    "AlphaFold",
+                    buildAlphaFoldEntryUrl(enrichment.getAlphaFoldAccession()),
+                    hasPdb ? 0 : 1
+            );
+        }
+    }
+
+    private void saveStructure(Long enzymeId, String structureType, String structureId, String sourceDb, String sourceUrl, int isPrimary) {
+        if (structureId == null || structureId.isBlank()) {
+            return;
+        }
+
+        EnzymeStructure existing = enzymeStructureMapper.selectOne(new LambdaQueryWrapper<EnzymeStructure>()
+                .eq(EnzymeStructure::getEnzymeId, enzymeId)
+                .eq(EnzymeStructure::getStructureType, structureType)
+                .eq(EnzymeStructure::getStructureId, structureId)
+                .last("LIMIT 1"));
+        if (existing != null) {
+            return;
+        }
+
+        EnzymeStructure structure = EnzymeStructure.builder()
+                .enzymeId(enzymeId)
+                .structureType(structureType)
+                .structureId(structureId)
+                .sourceDb(sourceDb)
+                .sourceUrl(sourceUrl)
+                .isPrimary(isPrimary)
+                .createdAt(LocalDateTime.now())
+                .build();
+        enzymeStructureMapper.insert(structure);
     }
 
     private Map<Long, EnzymeSequence> loadPrimarySequences(List<EnzymeEntry> entries) {
@@ -426,6 +519,39 @@ public class NcbiImportService {
         return pdbId == null || pdbId.isBlank()
                 ? null
                 : "https://www.rcsb.org/structure/" + pdbId;
+    }
+
+    private String buildUniProtUrl(String accession) {
+        return accession == null || accession.isBlank()
+                ? null
+                : "https://www.uniprot.org/uniprotkb/" + accession;
+    }
+
+    private String buildAlphaFoldEntryUrl(String accession) {
+        return accession == null || accession.isBlank()
+                ? null
+                : "https://alphafold.ebi.ac.uk/entry/" + accession;
+    }
+
+    private String extractProteinVersion(String accession) {
+        if (accession == null || accession.isBlank()) {
+            return null;
+        }
+        int dot = accession.indexOf('.');
+        return dot >= 0 && dot + 1 < accession.length() ? accession.substring(dot + 1) : null;
+    }
+
+    private String buildSuccessMessage(Optional<UniProtClient.ProteinEnrichment> enrichment) {
+        if (enrichment.isEmpty()) {
+            return "已从 NCBI 写入基础信息";
+        }
+        UniProtClient.ProteinEnrichment value = enrichment.get();
+        boolean hasPdb = !value.getPdbIds().isEmpty();
+        boolean hasAlphaFold = value.getAlphaFoldAccession() != null && !value.getAlphaFoldAccession().isBlank();
+        if (hasPdb || hasAlphaFold) {
+            return "已从 NCBI 和 UniProt 补全基础信息与结构引用";
+        }
+        return "已从 NCBI 和 UniProt 补全基础信息";
     }
 
     private ImportTaskResponse toTaskResponse(NcbiImportTask task, List<NcbiImportTaskItem> items) {

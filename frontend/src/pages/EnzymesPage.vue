@@ -65,18 +65,29 @@ const selectedEnzyme = computed(() => {
 const selectedStructureId = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return ''
-  return enzyme.structureId || enzyme.accession
+  return enzyme.structureId || enzyme.uniprotAccession || enzyme.accession
 })
 
 const selectedStructureUrl = computed(() => {
   const enzyme = selectedEnzyme.value
-  if (!enzyme?.structureUrl || enzyme.structureId) return undefined
+  if (!enzyme?.structureUrl) return undefined
+  if (enzyme.structureSourceDb === 'PDB' || enzyme.structureSourceDb === 'AlphaFold') return undefined
   return enzyme.structureUrl
 })
 
 const selectedStructureSource = computed(() => {
   const enzyme = selectedEnzyme.value
   return enzyme?.structureSourceDb || 'AUTO'
+})
+
+const selectedStructureFormat = computed<'pdb' | 'mmcif'>(() => {
+  const enzyme = selectedEnzyme.value
+  const structureUrl = enzyme?.structureUrl?.toLowerCase() || ''
+  const structureType = enzyme?.structureType?.toLowerCase() || ''
+  if (structureUrl.endsWith('.cif') || structureUrl.endsWith('.mmcif') || structureType.includes('mmcif')) {
+    return 'mmcif'
+  }
+  return 'pdb'
 })
 
 const selectedStructureType = computed(() => {
@@ -363,6 +374,8 @@ onMounted(async () => {
               <StructureViewer 
                 :pdb-id="selectedStructureId"
                 :url="selectedStructureUrl"
+                :source-db="selectedStructureSource"
+                :format="selectedStructureFormat"
               />
               
               <div class="absolute top-4 left-4 flex flex-col gap-2">

@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
-import { lib } from 'molstar/lib/apps/viewer/lib'
-import { ColorNames } from 'molstar/lib/mol-util/color/names'
-import * as loaders from 'molstar/lib/extensions/plugin/loaders'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Viewer } from 'molstar/lib/apps/viewer/app'
 
-// Import pre-compiled CSS
 import 'molstar/build/viewer/molstar.css'
-
-const { PluginContext, DefaultPluginSpec } = lib.plugin
 
 const props = defineProps<{
   pdbId?: string
   url?: string
+  sourceDb?: string
   format?: 'pdb' | 'mmcif'
 }>()
 
@@ -19,40 +15,27 @@ const parentRef = ref<HTMLDivElement | null>(null)
 const isLoading = ref(false)
 const hasError = ref(false)
 const errorMessage = ref('')
-let plugin: any = null // Using any because of the complex internal types
+let viewer: Viewer | null = null
 
 const initViewer = async () => {
   if (!parentRef.value) return
-  
+
   await nextTick()
 
   try {
-    // 1. Create Plugin Context with a minimal spec (no UI)
-    const spec = DefaultPluginSpec()
-    plugin = new PluginContext(spec)
-    
-    // 2. Initialize the plugin
-    await plugin.init()
+    viewer = await Viewer.create(parentRef.value, {
+      layoutShowControls: false,
+      layoutShowRemoteState: false,
+      layoutShowSequence: false,
+      layoutShowLog: false,
+      viewportShowAnimation: false,
+      viewportShowExpand: false,
+      viewportShowSelectionMode: false,
+      viewportShowControls: true,
+      viewportBackgroundColor: 'white'
+    })
 
-    // 3. Attach the canvas to our DOM element
-    if (plugin.canvas3d && parentRef.value) {
-      const canvas = plugin.canvas3d.handle.canvas
-      canvas.style.width = '100%'
-      canvas.style.height = '100%'
-      parentRef.value.appendChild(canvas)
-      
-      // Set background color
-      plugin.canvas3d.setProps({
-        renderer: { backgroundColor: ColorNames.white }
-      })
-    }
-
-    // 4. Load initial structure
-    if (props.pdbId) {
-      await loadStructure(props.pdbId)
-    } else if (props.url) {
-      await loadByUrl(props.url)
-    }
+    await reloadStructure()
   } catch (err) {
     console.error('Molstar init error:', err)
     hasError.value = true
@@ -60,25 +43,49 @@ const initViewer = async () => {
   }
 }
 
-const loadStructure = async (id: string) => {
-  if (!plugin) return
+const normalizeSourceDb = (value?: string) => (value || '').trim().toUpperCase()
+
+const shouldLoadFromUrl = () => Boolean(props.url) && !['PDB', 'ALPHAFOLD', 'ALPHAFOLDDB'].includes(normalizeSourceDb(props.sourceDb))
+
+const clearViewer = async () => {
+  if (!viewer) return
+  await viewer.plugin.clear()
+}
+
+const reloadStructure = async () => {
+  if (shouldLoadFromUrl() && props.url) {
+    await loadByUrl(props.url)
+  } else if (props.pdbId) {
+    await loadStructure(props.pdbId, props.sourceDb)
+  }
+}
+
+const loadStructure = async (id: string, sourceDb?: string) => {
+  if (!viewer) return
   isLoading.value = true
   hasError.value = false
   errorMessage.value = ''
+  const normalizedSourceDb = normalizeSourceDb(sourceDb)
 
   try {
-    // Clear existing models
-    await plugin.clear()
+    await clearViewer()
 
-    // 1. Try PDB (Experimental)
+    if (normalizedSourceDb === 'PDB') {
+      await viewer.loadPdb(id.toUpperCase())
+      return
+    }
+
+    if (normalizedSourceDb === 'ALPHAFOLD' || normalizedSourceDb === 'ALPHAFOLDDB') {
+      await viewer.loadAlphaFoldDb(id)
+      return
+    }
+
     try {
-      await loaders.loadPdb(plugin, id.toUpperCase())
+      await viewer.loadPdb(id.toUpperCase())
     } catch (pdbErr) {
       console.warn(`PDB ${id} not found, trying AlphaFold...`)
-      
-      // 2. Try AlphaFold (Predicted)
       try {
-        await loaders.loadAlphaFoldDb(plugin, id)
+        await viewer.loadAlphaFoldDb(id)
       } catch (afErr) {
         hasError.value = true
         errorMessage.value = '看来这只酶很有“自由意志”'
@@ -94,13 +101,17 @@ const loadStructure = async (id: string) => {
 }
 
 const loadByUrl = async (url: string) => {
-  if (!plugin) return
+  if (!viewer) return
   isLoading.value = true
   hasError.value = false
+  errorMessage.value = ''
   try {
-    await plugin.clear()
-    await loaders.loadUrl(plugin, url, props.format || 'pdb')
+    await clearViewer()
+    const normalizedUrl = url.toLowerCase()
+    const isBinary = normalizedUrl.endsWith('.bcif')
+    await viewer.loadStructureFromUrl(url, props.format || 'pdb', isBinary)
   } catch (e) {
+    console.error('URL structure loading error:', e)
     hasError.value = true
     errorMessage.value = 'URL 结构加载失败'
   } finally {
@@ -109,15 +120,20 @@ const loadByUrl = async (url: string) => {
 }
 
 watch(() => props.pdbId, async (newId) => {
-  if (newId && plugin) await loadStructure(newId)
+  if (newId && viewer && !shouldLoadFromUrl()) await loadStructure(newId, props.sourceDb)
 })
 
 watch(() => props.url, async (newUrl) => {
-  if (newUrl && plugin) await loadByUrl(newUrl)
+  if (newUrl && viewer && shouldLoadFromUrl()) await loadByUrl(newUrl)
 })
 
 watch(() => props.format, async () => {
-  if (props.url && plugin) await loadByUrl(props.url)
+  if (props.url && viewer && shouldLoadFromUrl()) await loadByUrl(props.url)
+})
+
+watch(() => props.sourceDb, async () => {
+  if (!viewer) return
+  await reloadStructure()
 })
 
 onMounted(() => {
@@ -125,9 +141,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (plugin) {
-    plugin.dispose()
-    plugin = null
+  if (viewer) {
+    viewer.dispose()
+    viewer = null
   }
 })
 </script>
@@ -167,7 +183,10 @@ onUnmounted(() => {
 <style>
 /* Style the container and handle canvas properly */
 .molstar-viewer-container {
-  display: flex;
+  width: 100%;
+  height: 100%;
+}
+.molstar-viewer-container :deep(.msp-plugin) {
   width: 100%;
   height: 100%;
 }
