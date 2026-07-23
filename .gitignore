@@ -1,40 +1,39 @@
-HELP.md
+# --- Java Backend ---
 target/
-.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
+!.mvn/wrapper/maven-wrapper.jar
 build/
-!**/src/main/**/build/
-!**/src/test/**/build/
+.gradle/
+*.class
+*.jar
+*.war
+*.ear
 
-### VS Code ###
+# --- Frontend (Vue3) ---
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+
+# --- Python Engine ---
+python_engine/__pycache__/
+python_engine/*.pyc
+python_engine/.venv/
+python_engine/venv/
+python_engine/env/
+python_engine/.pytest_cache/
+
+# --- IDEs & OS ---
+.idea/
 .vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
 
-### Local Configuration ###
-src/main/resources/application-local.properties
+# --- Local Config & Secrets ---
 .env
+src/main/resources/application-local.properties
+python_engine/.env
 
-### Large Modules & Models ###
-MiniFold/
+# --- Docker ---
+.docker/

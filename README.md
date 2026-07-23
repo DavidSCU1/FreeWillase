@@ -2,6 +2,19 @@
 
 酶有自由意志，但数据需要管理。
 
+## 快速开始 (一键启动)
+
+为了获得最佳开发体验，我们提供了集成启动脚本。只需运行根目录下的：
+- **`FreeWillase_Launcher.bat`** (Windows)
+
+该脚本将自动完成以下操作：
+1. 启动 Docker MySQL 容器。
+2. 启动 MiniFold-v1 AI 预测引擎 (Python)。
+3. 启动 Spring Boot 后端。
+4. 启动 Vue3 前端并进入开发模式。
+
+> "自由意志已夺回，所有引擎已就绪。"
+
 ## 技术栈
 - **后端**: Spring Boot 3.3.1, MyBatis-Plus, Flyway, MySQL
 - **前端**: Vue3, Tailwind CSS, Molstar (3D渲染)

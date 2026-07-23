@@ -44,7 +44,7 @@ const defaultBaseUrlHint = computed(() => {
   return ''
 })
 
-const canSubmit = computed(() => store.provider !== 'minifold' && !store.isSubmitting)
+const canSubmit = computed(() => !store.isSubmitting)
 
 const inputFormatTitle = computed(() => {
   if (store.moleculeType === 'ligand') return '输入格式'
@@ -231,8 +231,14 @@ function downloadStructure() {
                     <input v-model="store.name" type="text" placeholder="样本名/ID" class="apple-input text-xs" />
                   </div>
 
-                  <div v-if="store.provider === 'minifold'" class="text-[10px] font-bold text-apple-secondary-text leading-relaxed">
-                    MiniFold 已预留接口，本页面不做实现改动；请切换到 Biohub/NVIDIA/Chai-1 使用开源项目对应能力。
+                  <div v-if="store.provider === 'minifold'" class="space-y-3 p-3 rounded-apple bg-orange-500/5 border border-orange-500/10">
+                    <div class="flex items-center gap-2 text-orange-600">
+                      <Sparkles :size="14" />
+                      <span class="text-[10px] font-bold uppercase tracking-tight">MiniFold-v1 Ark Hybrid</span>
+                    </div>
+                    <div class="text-[10px] text-orange-600/80 leading-relaxed">
+                      基于火山引擎 Ark 大模型优化与物理折叠引擎。请在下方填写你的火山 API Key 以激活 AI 投票与精修功能。
+                    </div>
                   </div>
                 </div>
               </div>
