@@ -12,6 +12,7 @@ const { PluginContext, DefaultPluginSpec } = lib.plugin
 const props = defineProps<{
   pdbId?: string
   url?: string
+  format?: 'pdb' | 'mmcif'
 }>()
 
 const parentRef = ref<HTMLDivElement | null>(null)
@@ -98,7 +99,7 @@ const loadByUrl = async (url: string) => {
   hasError.value = false
   try {
     await plugin.clear()
-    await loaders.loadUrl(plugin, url, 'pdb')
+    await loaders.loadUrl(plugin, url, props.format || 'pdb')
   } catch (e) {
     hasError.value = true
     errorMessage.value = 'URL 结构加载失败'
@@ -113,6 +114,10 @@ watch(() => props.pdbId, async (newId) => {
 
 watch(() => props.url, async (newUrl) => {
   if (newUrl && plugin) await loadByUrl(newUrl)
+})
+
+watch(() => props.format, async () => {
+  if (props.url && plugin) await loadByUrl(props.url)
 })
 
 onMounted(() => {

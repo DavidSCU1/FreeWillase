@@ -38,3 +38,44 @@ export interface EnzymeEntry {
   pdbUrl?: string
   createdAt: string
 }
+
+export type PredictionProvider = 'biohub' | 'nvidia' | 'chai1' | 'minifold'
+
+export type MoleculeType = 'protein' | 'RNA' | 'DNA' | 'ligand'
+
+export interface PredictionConfig {
+  provider: PredictionProvider
+  apiKey: string
+  baseUrl?: string
+  rememberApiKey?: boolean
+}
+
+export interface PredictionRequest {
+  name: string
+  type: MoleculeType
+  model?: string
+  sequence?: string
+  sequenceRecords?: Array<{ name: string; sequence: string }>
+  smiles?: string
+}
+
+export interface PredictionResult {
+  providerName: string
+  modelName: string
+  format: 'pdb' | 'mmcif'
+  structure: string
+  plddt?: number
+  ptm?: number
+}
+
+export interface PredictionTask {
+  id: string
+  createdAt: string
+  status: 'running' | 'success' | 'error'
+  provider: PredictionProvider
+  moleculeType: MoleculeType
+  name: string
+  sequenceLength?: number
+  error?: string
+  result?: PredictionResult
+}
