@@ -24,6 +24,7 @@ const engines = [
   { id: 'biohub', label: 'Biohub' },
   { id: 'nvidia', label: 'NVIDIA ESMFold' },
   { id: 'chai1', label: 'Chai-1' },
+  { id: 'rnafold', label: 'RNAfold' },
 ] as const
 
 const pendingCount = computed(() => store.tasks.filter(t => t.status === 'running').length)
@@ -41,10 +42,15 @@ const defaultBaseUrlHint = computed(() => {
   if (store.provider === 'biohub') return '默认：https://www.biohub.ai'
   if (store.provider === 'nvidia') return '默认：https://health.api.nvidia.com'
   if (store.provider === 'chai1') return '默认：https://api.biolm.ai'
+  if (store.provider === 'rnafold') return '默认：系统后端代理 Vienna RNA RNAfold'
   return ''
 })
 
-const canSubmit = computed(() => !store.isSubmitting)
+const canSubmit = computed(() => store.provider !== 'minifold' && !store.isSubmitting)
+const nvidiaSingleOnly = computed(() => store.provider === 'nvidia')
+const rnafoldSingleOnly = computed(() => store.provider === 'rnafold')
+const requiresApiKey = computed(() => store.provider !== 'minifold' && store.provider !== 'rnafold')
+const rnafoldLockedType = computed(() => store.provider === 'rnafold')
 
 const inputFormatTitle = computed(() => {
   if (store.moleculeType === 'ligand') return '输入格式'
@@ -70,6 +76,16 @@ GSHMSTNPKPQRITFVKDAGQKALDNLVQKQGQKLEAELQKQKVGDKTLEEALNQK`
 MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK
 >chainB
 GSHMSTNPKPQRITFVKDAGQKALDNLVQKQGQKLEAELQKQKVGDKTLEEALNQK`
+  }
+
+  if (store.moleculeType === 'RNA') {
+    return `>sample_rna
+GGGAAAUCC`
+  }
+
+  if (store.moleculeType === 'DNA') {
+    return `>sample_dna
+ACGTACGTACGT`
   }
 
   return `>sample_1
@@ -142,7 +158,7 @@ function downloadStructure() {
               <div class="space-y-3">
                 <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">API 与参数</label>
                 <div class="space-y-4 p-4 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-                  <div class="space-y-2">
+                  <div v-if="requiresApiKey" class="space-y-2">
                     <span class="text-[10px] text-apple-secondary-text font-bold">API Key</span>
                     <input
                       v-model="store.apiKey"
@@ -172,6 +188,7 @@ function downloadStructure() {
                       type="text"
                       :placeholder="`留空使用默认（${defaultBaseUrlHint}）`"
                       class="apple-input text-xs"
+                      :disabled="store.provider === 'rnafold'"
                     />
                     <div v-if="defaultBaseUrlHint" class="text-[10px] text-apple-secondary-text">{{ defaultBaseUrlHint }}</div>
                   </div>
@@ -185,7 +202,7 @@ function downloadStructure() {
                     </div>
                     <div class="space-y-2">
                       <span class="text-[10px] text-apple-secondary-text font-bold">Molecule Type</span>
-                      <select v-model="store.moleculeType" class="apple-input text-xs">
+                      <select v-model="store.moleculeType" class="apple-input text-xs" :disabled="rnafoldLockedType">
                         <option v-for="t in store.supportedTypes" :key="t" :value="t">{{ t }}</option>
                       </select>
                     </div>
@@ -205,7 +222,7 @@ function downloadStructure() {
                       <button
                         type="button"
                         @click="store.submitMode = 'batch'"
-                        :disabled="store.moleculeType === 'ligand'"
+                        :disabled="store.moleculeType === 'ligand' || nvidiaSingleOnly || rnafoldSingleOnly"
                         :class="store.submitMode === 'batch' ? 'border-apple-blue bg-apple-blue/5 text-apple-blue' : 'border-apple-border text-apple-secondary-text'"
                         class="px-4 py-3 rounded-apple border text-xs font-bold transition-all disabled:opacity-50"
                       >
@@ -214,7 +231,7 @@ function downloadStructure() {
                       <button
                         type="button"
                         @click="store.submitMode = 'complex'"
-                        :disabled="store.moleculeType === 'ligand' || store.provider !== 'chai1'"
+                        :disabled="store.moleculeType === 'ligand' || store.provider !== 'chai1' || nvidiaSingleOnly || rnafoldSingleOnly"
                         :class="store.submitMode === 'complex' ? 'border-apple-blue bg-apple-blue/5 text-apple-blue' : 'border-apple-border text-apple-secondary-text'"
                         class="px-4 py-3 rounded-apple border text-xs font-bold transition-all disabled:opacity-50"
                       >
@@ -222,7 +239,13 @@ function downloadStructure() {
                       </button>
                     </div>
                     <div class="text-[10px] text-apple-secondary-text">
-                      单条提交支持 Plain 或单条 FASTA；多条提交会将每条 FASTA 拆成独立任务；多链复合体会将多条 FASTA 作为同一次预测的不同链（仅 Chai-1）。
+                      {{
+                        nvidiaSingleOnly
+                          ? 'NVIDIA ESMFold 由于模型限制仅支持单条提交，已禁用多条提交与多链复合体。'
+                          : rnafoldSingleOnly
+                            ? 'RNAfold 通过系统后端代理调用网页服务，仅支持单条 RNA 序列预测，无需 API Key。'
+                          : '单条提交支持 Plain 或单条 FASTA；多条提交会将每条 FASTA 拆成独立任务；多链复合体会将多条 FASTA 作为同一次预测的不同链（仅 Chai-1）。'
+                      }}
                     </div>
                   </div>
 
@@ -266,7 +289,9 @@ function downloadStructure() {
                     ? '多条提交时请使用多 FASTA 格式，每条记录都以 >名称 开头。'
                     : store.submitMode === 'complex'
                       ? '多链复合体时请使用多 FASTA 格式，每条记录会作为一条链（Chain）。'
-                      : '单条提交支持 Plain 或单条 FASTA，系统会自动去掉标题行与换行。'
+                      : store.provider === 'rnafold'
+                        ? 'RNAfold 支持单条 RNA 序列或单条 FASTA，系统会自动去掉标题行与换行。'
+                        : '单条提交支持 Plain 或单条 FASTA，系统会自动去掉标题行与换行。'
                 }}
               </div>
               <div class="rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 p-4">
@@ -319,6 +344,12 @@ function downloadStructure() {
                 <span v-if="store.activeTask?.result" class="flex items-center gap-1">
                   Model: {{ store.activeTask.result.modelName }}
                 </span>
+                <span v-if="store.activeTask?.result?.mfeEnergy != null" class="flex items-center gap-1">
+                  MFE: {{ store.activeTask.result.mfeEnergy.toFixed(2) }} kcal/mol
+                </span>
+                <span v-if="store.activeTask?.result?.ensembleFreeEnergy != null" class="flex items-center gap-1">
+                  Ensemble: {{ store.activeTask.result.ensembleFreeEnergy.toFixed(2) }} kcal/mol
+                </span>
                 <span v-if="store.activeTask?.result?.plddt != null" class="flex items-center gap-1">
                   pLDDT: {{ store.activeTask.result.plddt.toFixed(2) }}
                 </span>
@@ -328,7 +359,7 @@ function downloadStructure() {
               </div>
 
               <button
-                v-if="store.lastStructureText"
+                v-if="store.lastStructureText && store.viewerFormat !== 'dot-bracket'"
                 type="button"
                 class="apple-button-secondary flex items-center gap-2"
                 @click="downloadStructure"
@@ -338,10 +369,40 @@ function downloadStructure() {
               </button>
             </div>
 
+            <div v-if="store.viewerFormat === 'dot-bracket' && store.activeTask?.result" class="rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 p-5 space-y-4">
+              <div class="text-xs font-bold text-apple-text">RNA 二级结构结果</div>
+              <div class="text-[10px] text-apple-secondary-text font-bold uppercase tracking-widest">Sequence</div>
+              <pre class="text-xs font-mono text-apple-text whitespace-pre-wrap break-all">{{ store.activeTask.result.sequence }}</pre>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="rounded-apple border border-apple-border p-4">
+                  <div class="text-[10px] text-apple-secondary-text font-bold uppercase tracking-widest mb-2">MFE Dot-Bracket</div>
+                  <pre class="text-xs font-mono text-apple-text whitespace-pre-wrap break-all">{{ store.activeTask.result.mfeStructure || store.activeTask.result.structure }}</pre>
+                </div>
+                <div class="rounded-apple border border-apple-border p-4">
+                  <div class="text-[10px] text-apple-secondary-text font-bold uppercase tracking-widest mb-2">Centroid Dot-Bracket</div>
+                  <pre class="text-xs font-mono text-apple-text whitespace-pre-wrap break-all">{{ store.activeTask.result.centroidStructure || '—' }}</pre>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div class="rounded-apple border border-apple-border p-3">MFE: {{ store.activeTask.result.mfeEnergy?.toFixed(2) ?? '—' }}</div>
+                <div class="rounded-apple border border-apple-border p-3">Ensemble: {{ store.activeTask.result.ensembleFreeEnergy?.toFixed(2) ?? '—' }}</div>
+                <div class="rounded-apple border border-apple-border p-3">Freq: {{ store.activeTask.result.mfeFrequency?.toFixed(2) ?? '—' }}%</div>
+                <div class="rounded-apple border border-apple-border p-3">Diversity: {{ store.activeTask.result.ensembleDiversity?.toFixed(2) ?? '—' }}</div>
+              </div>
+              <a
+                v-if="store.activeTask.result.resultPageUrl"
+                :href="store.activeTask.result.resultPageUrl"
+                target="_blank"
+                rel="noreferrer"
+                class="inline-flex items-center text-xs font-bold text-apple-blue hover:underline"
+              >
+                打开 RNAfold 原始结果页
+              </a>
+            </div>
             <StructureViewer
-              v-if="store.viewerUrl"
+              v-else-if="store.viewerUrl"
               :url="store.viewerUrl || undefined"
-              :format="store.viewerFormat"
+              :format="store.viewerFormat === 'dot-bracket' ? 'pdb' : store.viewerFormat"
             />
             <div
               v-else

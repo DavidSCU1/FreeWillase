@@ -12,6 +12,11 @@ interface MatchRequest {
   ncbiApiKey?: string
 }
 
+interface RnaFoldRequest {
+  name: string
+  sequence: string
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token')
   const response = await fetch(url, {
@@ -124,4 +129,11 @@ export function getDashboardStats() {
     literatureCoverage: string
     systemStatus: string
   }>('/api/dashboard/stats')
+}
+
+export function predictRnaFold(payload: RnaFoldRequest) {
+  return request<any>('/api/prediction/rnafold', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }

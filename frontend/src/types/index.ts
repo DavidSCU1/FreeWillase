@@ -39,7 +39,7 @@ export interface EnzymeEntry {
   createdAt: string
 }
 
-export type PredictionProvider = 'biohub' | 'nvidia' | 'chai1' | 'minifold'
+export type PredictionProvider = 'biohub' | 'nvidia' | 'chai1' | 'rnafold' | 'minifold'
 
 export type MoleculeType = 'protein' | 'RNA' | 'DNA' | 'ligand'
 
@@ -62,10 +62,19 @@ export interface PredictionRequest {
 export interface PredictionResult {
   providerName: string
   modelName: string
-  format: 'pdb' | 'mmcif'
+  format: 'pdb' | 'mmcif' | 'dot-bracket'
   structure: string
+  sequence?: string
   plddt?: number
   ptm?: number
+  resultPageUrl?: string
+  mfeStructure?: string
+  mfeEnergy?: number
+  ensembleFreeEnergy?: number
+  mfeFrequency?: number
+  ensembleDiversity?: number
+  centroidStructure?: string
+  centroidEnergy?: number
 }
 
 export interface PredictionTask {

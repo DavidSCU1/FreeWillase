@@ -21,7 +21,7 @@ const handleLogin = async () => {
   try {
     await login(username.value, password.value)
   } catch (err) {
-    error.value = '登录失败，请检查凭据'
+    error.value = err instanceof Error ? err.message : '登录失败，请检查凭据'
   } finally {
     loading.value = false
   }

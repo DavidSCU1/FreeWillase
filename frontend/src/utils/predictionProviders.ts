@@ -1,4 +1,5 @@
 import type { MoleculeType, PredictionConfig, PredictionRequest, PredictionResult } from '@/types'
+import { predictRnaFold } from '@/utils/api'
 
 export interface ParsedSequenceRecord {
   name: string
@@ -9,12 +10,14 @@ const DEFAULT_BASE_URL: Record<Exclude<PredictionConfig['provider'], 'minifold'>
   biohub: 'https://www.biohub.ai',
   nvidia: 'https://health.api.nvidia.com',
   chai1: 'https://api.biolm.ai',
+  rnafold: '/api/prediction',
 }
 
 const BIOHUB_MODELS = ['esmfold2-fast-2026-05', 'esmfold2-2026-05', 'esm3-open-2024-03'] as const
 const NVIDIA_MODELS = ['esmfold'] as const
 const CHAI1_MODELS = ['chai1'] as const
 const MINIFOLD_MODELS = ['MiniFold-v1 (Ark Hybrid)'] as const
+const RNAFOLD_MODELS = ['rnafold'] as const
 
 const SEQUENCE_RULES = {
   protein: {
@@ -39,6 +42,7 @@ export function getSupportedModels(provider: PredictionConfig['provider']): stri
   if (provider === 'nvidia') return [...NVIDIA_MODELS]
   if (provider === 'chai1') return [...CHAI1_MODELS]
   if (provider === 'minifold') return [...MINIFOLD_MODELS]
+  if (provider === 'rnafold') return [...RNAFOLD_MODELS]
   return []
 }
 
@@ -46,10 +50,12 @@ export function getSupportedMoleculeTypes(provider: PredictionConfig['provider']
   if (provider === 'biohub') return ['protein', 'RNA', 'DNA']
   if (provider === 'nvidia') return ['protein']
   if (provider === 'chai1') return ['protein', 'RNA', 'DNA', 'ligand']
+  if (provider === 'rnafold') return ['RNA']
   return ['protein']
 }
 
 function getDevProxyBaseUrl(provider: Exclude<PredictionConfig['provider'], 'minifold'>) {
+  if (provider === 'rnafold') return '/api/prediction'
   return `/proxy/${provider}`
 }
 
@@ -62,6 +68,7 @@ function pickBaseUrl(config: PredictionConfig): string {
 }
 
 function assertApiKey(config: PredictionConfig) {
+  if (config.provider === 'rnafold') return
   if (!config.apiKey?.trim()) throw new Error('请先填写 API Key')
 }
 
@@ -192,6 +199,7 @@ function normalizeName(name: string) {
 function getProviderLabel(provider: Exclude<PredictionConfig['provider'], 'minifold'>) {
   if (provider === 'biohub') return 'Biohub'
   if (provider === 'nvidia') return 'NVIDIA ESMFold'
+  if (provider === 'rnafold') return 'RNAfold'
   return 'Chai-1'
 }
 
@@ -391,34 +399,15 @@ export async function predictStructure(config: PredictionConfig, request: Predic
     }
   }
 
-  if (config.provider === 'minifold') {
-    const baseUrl = pickBaseUrl(config)
-    const response = await fetch(`${baseUrl}/minifold`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`, // Use backend auth
-      },
-      body: JSON.stringify({
-        sequence: normalizedSequence,
-        apiKey: config.apiKey.trim(), // This is the Volcano API key
-        envText: '', // Can be extended later
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`MiniFold 预测失败: ${errorText}`)
-    }
-
-    const body = await response.json()
-    return {
-      providerName: 'MiniFold-v1',
-      modelName: 'Ark Hybrid',
-      format: 'pdb',
-      structure: body.pdb,
-      analysis: body.analysis,
-    }
+  if (config.provider === 'rnafold') {
+    if (request.type !== 'RNA') throw new Error('RNAfold 仅支持 RNA')
+    if (normalizedRecords.length !== 1) throw new Error('RNAfold 当前仅支持单条 RNA 序列')
+    const body = await predictRnaFold({
+      name: request.name,
+      sequence: normalizedSequence || '',
+    }) as PredictionResult
+    if (!body?.structure?.trim()) throw new Error('RNAfold 返回结构为空')
+    return body
   }
 
   throw new Error('不支持的 provider')

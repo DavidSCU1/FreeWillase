@@ -8,9 +8,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
 
@@ -37,6 +39,24 @@ public class ApiExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
         return buildErrorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
+        return buildErrorResponse(HttpStatus.NOT_FOUND, "接口不存在");
+    }
+
+    @ExceptionHandler(RestClientException.class)
+    public ResponseEntity<ErrorResponse> handleRestClientException(RestClientException ex) {
+        String detail = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
+        String message = "上游服务请求失败，请稍后重试";
+        if (detail != null) {
+            String t = detail.toLowerCase();
+            if (t.contains("rna.tbi.univie.ac.at") || t.contains("unable to connect") || t.contains("connection") || t.contains("connect")) {
+                message = "无法连接 RNAfold 网站（rna.tbi.univie.ac.at）。可能是网络/防火墙限制，请配置代理或在可访问网络部署后端。";
+            }
+        }
+        return buildErrorResponse(HttpStatus.BAD_GATEWAY, message);
     }
 
     @ExceptionHandler(Exception.class)

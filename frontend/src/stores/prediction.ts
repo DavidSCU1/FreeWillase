@@ -48,7 +48,7 @@ export const usePredictionStore = defineStore('prediction', () => {
   const error = ref<string | null>(null)
 
   const viewerUrl = ref<string | null>(null)
-  const viewerFormat = ref<'pdb' | 'mmcif'>('pdb')
+  const viewerFormat = ref<'pdb' | 'mmcif' | 'dot-bracket'>('pdb')
   const lastStructureText = ref<string | null>(null)
 
   const supportedModels = computed(() => getSupportedModels(provider.value))
@@ -91,8 +91,14 @@ export const usePredictionStore = defineStore('prediction', () => {
     viewerUrl.value = null
   }
 
-  function setViewer(structure: string, format: 'pdb' | 'mmcif') {
+  function setViewer(structure: string, format: 'pdb' | 'mmcif' | 'dot-bracket') {
     revokeViewerUrl()
+    if (format === 'dot-bracket') {
+      viewerUrl.value = null
+      viewerFormat.value = format
+      lastStructureText.value = structure
+      return
+    }
     const fileName = format === 'pdb' ? 'prediction.pdb' : 'prediction.cif'
     const blob = new Blob([structure], { type: 'text/plain' })
     viewerUrl.value = URL.createObjectURL(blob)
@@ -118,6 +124,14 @@ export const usePredictionStore = defineStore('prediction', () => {
     if (moleculeType.value === 'ligand' && submitMode.value === 'complex') {
       submitMode.value = 'single'
     }
+    if (provider.value === 'nvidia' && submitMode.value !== 'single') {
+      submitMode.value = 'single'
+    }
+    if (provider.value === 'rnafold') {
+      moleculeType.value = 'RNA'
+      submitMode.value = 'single'
+      baseUrl.value = ''
+    }
   }
 
   async function submit() {
@@ -130,6 +144,22 @@ export const usePredictionStore = defineStore('prediction', () => {
     if (submitMode.value !== 'single' && moleculeType.value === 'ligand') {
       error.value = 'Ligand 当前仅支持单条提交'
       return
+    }
+
+    if (provider.value === 'nvidia' && submitMode.value !== 'single') {
+      error.value = 'NVIDIA ESMFold 由于模型限制仅支持单条提交'
+      return
+    }
+
+    if (provider.value === 'rnafold') {
+      if (moleculeType.value !== 'RNA') {
+        error.value = 'RNAfold 仅支持 RNA 序列预测'
+        return
+      }
+      if (submitMode.value !== 'single') {
+        error.value = 'RNAfold 当前仅支持单条提交'
+        return
+      }
     }
 
     if (submitMode.value === 'complex' && provider.value !== 'chai1') {
