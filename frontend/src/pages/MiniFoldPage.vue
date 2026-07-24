@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity,
@@ -10,6 +10,7 @@ import {
   Download,
   Dna,
   FileText,
+  FolderPlus,
   Layers3,
   Loader2,
   Maximize2,
@@ -19,12 +20,34 @@ import {
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { useMiniFoldStore } from '@/stores/minifold'
+import { normalizeSequenceInput } from '@/utils/predictionProviders'
+import { getMiniFoldLogs, saveMiniFoldEnzyme } from '@/utils/api'
+import type { EnzymeEntry } from '@/types'
 
 const router = useRouter()
 const store = useMiniFoldStore()
 const showFullscreenViewer = ref(false)
+const libraryEntryName = ref('')
+const isSavingToLibrary = ref(false)
+const saveToLibraryError = ref('')
+const savedLibraryEntry = ref<EnzymeEntry | null>(null)
+const runtimeLog = ref('')
+const lastLogUpdatedAt = ref<number | null>(null)
+const consoleViewport = ref<HTMLElement | null>(null)
+const autoScrollLogs = ref(true)
+const nowTick = ref(Date.now())
 
 let resultInterval: ReturnType<typeof setInterval> | null = null
+let logInterval: ReturnType<typeof setInterval> | null = null
+let clockInterval: ReturnType<typeof setInterval> | null = null
+
+const taskStageBlueprint = [
+  { label: '提交任务', hint: '校验输入并向后端申请任务号' },
+  { label: '启动运行时', hint: '拉起 Python worker 与本地环境' },
+  { label: '解析输入', hint: '读取 FASTA、环境描述与链数约束' },
+  { label: '结构推理', hint: '生成候选、骨架与多链结构' },
+  { label: '输出结果', hint: '整理日志、写出 PDB 与结果文件' },
+] as const
 
 const targetChainOptions = [
   { label: '自动判断', value: '' },
@@ -43,7 +66,7 @@ const backendOptions = [
   { label: 'CPU', value: 'cpu', hint: '最稳妥，但速度最慢' },
 ] as const
 
-const selectedStructureId = computed(() => store.engineTaskId || 'LOCAL-PDB')
+const selectedStructureId = computed(() => store.engineTaskId || '尚未创建')
 const selectedStructureStatus = computed(() => {
   if (store.status === 'success') return '本地结构已生成'
   if (store.status === 'running') return '结构计算中'
@@ -103,6 +126,88 @@ const readinessItems = computed(() => [
     hint: `${targetChainLabel.value} · ${store.useAcceleration ? backendLabel.value : 'CPU'} · ${store.condaEnvName.trim() || '自动环境'}`,
   },
 ])
+const runtimeLogLines = computed(() => runtimeLog.value.split(/\r?\n/).filter(Boolean))
+const latestLogLines = computed(() => runtimeLogLines.value.slice(-6))
+const runtimePulseBars = computed(() => {
+  const values = [34, 48, 30, 72, 28, 60, 42, 78, 36, 54, 33, 66]
+  return values.map((value, index) => ({
+    key: `${index}-${value}`,
+    height: `${value}%`,
+    delay: `${(index % 6) * 0.12}s`,
+  }))
+})
+const activeStageIndex = computed(() => {
+  if (store.status === 'idle') return -1
+  if (!store.engineTaskId) return store.status === 'error' ? 0 : 0
+
+  const log = runtimeLog.value
+  if (store.status === 'success') return taskStageBlueprint.length - 1
+  if (store.status === 'error' && !log.trim()) return 1
+  if (log.includes('Pipeline finished') || log.includes('Runtime Finished')) return 4
+  if (log.includes('候选生成完成') || log.includes('Structure') || log.includes('3d_structures')) return 3
+  if (log.includes('处理序列') || log.includes('读取 FASTA') || log.includes('Target chains')) return 2
+  if (log.includes('Runtime Started') || log.includes('Loaded environment file')) return 1
+  return 0
+})
+const stageProgress = computed(() => {
+  if (store.status === 'idle') return 0
+  if (store.status === 'success') return 100
+  if (store.status === 'error' && activeStageIndex.value < 0) return 8
+  const total = taskStageBlueprint.length
+  const base = ((Math.max(activeStageIndex.value, 0) + 1) / total) * 100
+  if (store.status === 'running') {
+    return Math.min(base + 8, 92)
+  }
+  return Math.max(base, 12)
+})
+const stageItems = computed(() => taskStageBlueprint.map((item, index) => ({
+  ...item,
+  state: store.status === 'success'
+    ? 'done'
+    : store.status === 'error' && index === Math.max(activeStageIndex.value, 0)
+      ? 'error'
+      : index < activeStageIndex.value
+        ? 'done'
+        : index === activeStageIndex.value
+          ? 'active'
+          : 'pending',
+})))
+const runtimeHeadline = computed(() => {
+  if (store.status === 'success') return '结构已完成，可直接查看结果'
+  if (store.status === 'error') return store.engineTaskId ? '任务中途停止，请看下方日志' : '请求尚未进入任务队列'
+  if (store.status === 'running') return '运行时正在连续输出，日志会自动刷新'
+  return '点击开始后，这里会展示完整任务过程'
+})
+const elapsedLabel = computed(() => {
+  if (!store.taskStartedAt) return '00:00'
+  const seconds = Math.max(0, Math.floor((nowTick.value - store.taskStartedAt) / 1000))
+  const minutes = Math.floor(seconds / 60)
+  const remain = seconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(remain).padStart(2, '0')}`
+})
+const logTimestampLabel = computed(() => {
+  if (!lastLogUpdatedAt.value) return '尚未刷新'
+  const date = new Date(lastLogUpdatedAt.value)
+  return date.toLocaleTimeString('zh-CN', { hour12: false })
+})
+const recoveredTaskHint = computed(() => {
+  if (!store.engineTaskId) return ''
+  if (store.status === 'running') return '页面已恢复上次未完成任务，正在继续监控实时输出。'
+  if (store.status === 'success') return '页面已恢复上次任务结果，你可以继续查看结构或下载 PDB。'
+  if (store.status === 'error') return '页面已恢复上次任务状态，可直接查看失败信息与日志。'
+  return ''
+})
+const taskList = computed(() => store.taskHistory.map(task => ({
+  ...task,
+  badgeClass: task.status === 'running'
+    ? 'bg-apple-blue/10 text-apple-blue'
+    : task.status === 'success'
+      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+      : 'bg-red-500/10 text-red-500',
+  badgeLabel: task.status === 'running' ? 'Running' : task.status === 'success' ? 'Success' : 'Error',
+  isActive: task.taskId === store.engineTaskId,
+  updatedLabel: new Date(task.updatedAt).toLocaleTimeString('zh-CN', { hour12: false }),
+})))
 const statusMeta = computed(() => {
   if (store.status === 'success') {
     return {
@@ -122,8 +227,10 @@ const statusMeta = computed(() => {
   }
   if (store.status === 'error') {
     return {
-      title: '任务执行失败',
-      description: store.error || '请检查输入格式、环境约束或本机后端状态后重试。',
+      title: store.engineTaskId ? '任务执行失败' : '提交未成功',
+      description: store.error || (store.engineTaskId
+        ? '请检查输入格式、环境约束或本机后端状态后重试。'
+        : '这次请求还没拿到任务 ID，说明失败发生在提交阶段。请查看页面下方错误提示或浏览器控制台日志。'),
       chip: 'Error',
       chipClass: 'bg-red-500/10 text-red-500',
     }
@@ -134,6 +241,16 @@ const statusMeta = computed(() => {
     chip: 'Idle',
     chipClass: 'bg-apple-background text-apple-secondary-text',
   }
+})
+const suggestedLibraryName = computed(() => {
+  const header = store.sequence
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(line => line.startsWith('>'))
+    ?.replace(/^>/, '')
+    .trim()
+
+  return header || `MiniFold 预测 ${selectedStructureId.value}`
 })
 
 function fillExample() {
@@ -149,11 +266,64 @@ function stopPolling() {
     clearInterval(resultInterval)
     resultInterval = null
   }
+  if (logInterval) {
+    clearInterval(logInterval)
+    logInterval = null
+  }
+}
+
+function syncClock() {
+  nowTick.value = Date.now()
+}
+
+function ensureClock() {
+  if (clockInterval) return
+  clockInterval = setInterval(syncClock, 1000)
+}
+
+function stopClock() {
+  if (!clockInterval) return
+  clearInterval(clockInterval)
+  clockInterval = null
+}
+
+async function refreshLogs() {
+  if (!store.engineTaskId) return
+  try {
+    const logs = await getMiniFoldLogs(store.engineTaskId)
+    runtimeLog.value = typeof logs === 'string' ? logs : JSON.stringify(logs, null, 2)
+    lastLogUpdatedAt.value = Date.now()
+    if (autoScrollLogs.value) {
+      await nextTick()
+      if (consoleViewport.value) {
+        consoleViewport.value.scrollTop = consoleViewport.value.scrollHeight
+      }
+    }
+  } catch (error) {
+    runtimeLog.value = `日志读取失败：${error instanceof Error ? error.message : '未知错误'}`
+    lastLogUpdatedAt.value = Date.now()
+  }
+}
+
+function startLogPolling() {
+  if (!store.engineTaskId) return
+  refreshLogs()
+  if (logInterval) {
+    clearInterval(logInterval)
+  }
+  logInterval = setInterval(refreshLogs, 2000)
+}
+
+function handleLogScroll(event: Event) {
+  const target = event.target as HTMLElement
+  const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+  autoScrollLogs.value = distanceToBottom < 32
 }
 
 function startPolling() {
   if (!store.engineTaskId) return
   stopPolling()
+  startLogPolling()
   resultInterval = setInterval(async () => {
     const finished = await store.fetchResult()
     if (finished) stopPolling()
@@ -161,9 +331,17 @@ function startPolling() {
 }
 
 async function handleSubmit() {
+  saveToLibraryError.value = ''
+  savedLibraryEntry.value = null
+  runtimeLog.value = ''
+  lastLogUpdatedAt.value = null
+  autoScrollLogs.value = true
+  ensureClock()
   const started = await store.submit()
   if (started && store.engineTaskId && store.status === 'running') {
     startPolling()
+  } else if (!started && store.status !== 'running') {
+    stopClock()
   }
 }
 
@@ -186,22 +364,93 @@ function updateTargetChains(event: Event) {
   store.targetChains = value ? Number(value) : null
 }
 
+async function activateTask(taskId: string) {
+  const switched = store.activateTask(taskId)
+  if (!switched) return
+
+  runtimeLog.value = ''
+  lastLogUpdatedAt.value = null
+  autoScrollLogs.value = true
+
+  if (store.status === 'running') {
+    ensureClock()
+    startPolling()
+  } else {
+    stopPolling()
+    stopClock()
+    await refreshLogs()
+  }
+}
+
+async function handleSaveToLibrary() {
+  if (!store.lastStructureText) return
+  if (!libraryEntryName.value.trim()) {
+    saveToLibraryError.value = '请先给这次预测结果起一个名字'
+    return
+  }
+
+  try {
+    isSavingToLibrary.value = true
+    saveToLibraryError.value = ''
+    const normalizedSequence = normalizeSequenceInput(store.sequence, 'protein')
+    savedLibraryEntry.value = await saveMiniFoldEnzyme({
+      name: libraryEntryName.value.trim(),
+      sequence: normalizedSequence,
+      pdb: store.lastStructureText,
+      taskId: store.engineTaskId || undefined,
+      envText: store.envText.trim() || undefined,
+      targetChains: store.targetChains ?? undefined,
+      backend: store.useAcceleration ? store.backend : 'cpu',
+      useAcceleration: store.useAcceleration,
+    })
+  } catch (error) {
+    saveToLibraryError.value = error instanceof Error ? error.message : '入库失败，请稍后重试'
+  } finally {
+    isSavingToLibrary.value = false
+  }
+}
+
 watch(() => store.engineTaskId, (newId) => {
   if (newId && store.status === 'running') {
+    ensureClock()
     startPolling()
   } else {
     stopPolling()
   }
 })
 
+watch(() => store.status, status => {
+  if (status === 'success' && !libraryEntryName.value.trim()) {
+    libraryEntryName.value = suggestedLibraryName.value
+  }
+  if (status !== 'success') {
+    savedLibraryEntry.value = null
+  }
+  if (status === 'idle') {
+    runtimeLog.value = ''
+    lastLogUpdatedAt.value = null
+    autoScrollLogs.value = true
+    stopClock()
+  }
+  if (status === 'success' || status === 'error') {
+    refreshLogs()
+    stopClock()
+  }
+})
+
 onMounted(() => {
   if (store.engineTaskId && store.status === 'running') {
+    ensureClock()
     startPolling()
+  }
+  if (store.engineTaskId && (store.status === 'success' || store.status === 'error')) {
+    refreshLogs()
   }
 })
 
 onUnmounted(() => {
   stopPolling()
+  stopClock()
 })
 </script>
 
@@ -245,6 +494,9 @@ onUnmounted(() => {
 
             <p class="max-w-2xl text-sm leading-relaxed text-apple-secondary-text">
               {{ statusMeta.description }}
+            </p>
+            <p v-if="recoveredTaskHint" class="text-[11px] font-bold text-apple-blue">
+              {{ recoveredTaskHint }}
             </p>
           </div>
 
@@ -379,22 +631,22 @@ onUnmounted(() => {
             <div>
               <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 3</p>
               <h3 class="text-sm font-bold text-apple-text">确认执行配置</h3>
-              <p class="text-[11px] text-apple-secondary-text">先指定 Python / Conda 环境，再决定是否加速和后端，最后从摘要确认这次任务会怎么跑。</p>
+              <p class="text-[11px] text-apple-secondary-text">这里既支持填写 Conda 环境名，也支持直接填写 Python 可执行文件路径，再决定是否加速和后端。</p>
             </div>
           </div>
 
           <div class="space-y-2">
             <div class="flex items-center justify-between">
-              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">Conda 环境名</label>
+              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">Conda 环境名 / Python 路径</label>
               <span class="text-[10px] font-bold text-apple-secondary-text">{{ store.condaEnvName.trim() ? '用户指定' : '自动发现' }}</span>
             </div>
             <input
               v-model="store.condaEnvName"
               type="text"
               class="apple-input text-xs"
-              placeholder="例如：minifold 或 my-torch-env"
+              placeholder="例如：minifold 或 D:\\MiniFold\\python-portable\\python.exe"
             />
-            <p class="text-[11px] text-apple-secondary-text">留空时将继续使用 `MINIFOLD_PYTHON` 或系统 Python；填写后会优先执行 `conda run -n 环境名 python`。</p>
+            <p class="text-[11px] text-apple-secondary-text">留空时继续使用 `MINIFOLD_PYTHON` 或系统 Python；填环境名会执行 `conda run -n 环境名 python`，填 `.exe` / 路径则直接调用该解释器。</p>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -490,6 +742,59 @@ onUnmounted(() => {
         <div class="apple-card p-6 space-y-4">
           <div class="flex items-center justify-between gap-3">
             <div class="space-y-1">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">任务列表</p>
+              <h3 class="text-sm font-bold text-apple-text">最近 MiniFold 任务</h3>
+            </div>
+            <span class="rounded-full bg-apple-background px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
+              {{ taskList.length }} items
+            </span>
+          </div>
+
+          <div class="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+            <button
+              v-for="task in taskList"
+              :key="task.taskId"
+              type="button"
+              class="w-full rounded-apple border px-4 py-3 text-left transition-all"
+              :class="task.isActive
+                ? 'border-apple-blue/40 bg-apple-blue/5 shadow-sm'
+                : 'border-apple-border bg-white/60 dark:bg-white/5 hover:bg-apple-background/50'"
+              @click="activateTask(task.taskId)"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex items-center gap-2">
+                    <p class="text-xs font-bold text-apple-text">#{{ task.taskId }}</p>
+                    <span class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" :class="task.badgeClass">
+                      {{ task.badgeLabel }}
+                    </span>
+                    <span v-if="task.isActive" class="rounded-full bg-apple-text px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white">
+                      Current
+                    </span>
+                  </div>
+                  <p class="text-[11px] text-apple-secondary-text">
+                    {{ task.sequenceLength }} aa · {{ task.targetChains ? `${task.targetChains} 条链` : '自动链数' }} · {{ task.backend }}
+                  </p>
+                  <p class="truncate text-[11px] text-apple-secondary-text">
+                    {{ task.error || task.pythonLabel }}
+                  </p>
+                </div>
+                <div class="shrink-0 text-right">
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Updated</p>
+                  <p class="mt-1 text-[11px] font-semibold text-apple-text">{{ task.updatedLabel }}</p>
+                </div>
+              </div>
+            </button>
+
+            <div v-if="taskList.length === 0" class="rounded-apple border border-dashed border-apple-border bg-apple-background/35 px-4 py-6 text-center text-[11px] text-apple-secondary-text">
+              还没有 MiniFold 历史任务。开始第一次推理后，这里会自动记录并可随时切回查看。
+            </div>
+          </div>
+        </div>
+
+        <div class="apple-card p-6 space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="space-y-1">
               <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">运行状态</p>
               <h3 class="text-sm font-bold text-apple-text">{{ statusMeta.title }}</h3>
             </div>
@@ -520,6 +825,159 @@ onUnmounted(() => {
             <p class="mt-1"><span class="font-bold text-apple-text">后端：</span>{{ store.useAcceleration ? backendLabel : 'CPU' }}</p>
             <p class="mt-1"><span class="font-bold text-apple-text">Python：</span>{{ condaEnvLabel }}</p>
             <p class="mt-1"><span class="font-bold text-apple-text">链数：</span>{{ targetChainLabel }}</p>
+          </div>
+        </div>
+
+        <div class="apple-card p-6 space-y-5 overflow-hidden">
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">任务进程</p>
+              <h3 class="text-sm font-bold text-apple-text">MiniFold Runtime Monitor</h3>
+              <p class="text-[11px] text-apple-secondary-text">{{ runtimeHeadline }}</p>
+            </div>
+            <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-3 py-2 text-right">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Elapsed</p>
+              <p class="mt-1 text-lg font-bold text-apple-text tabular-nums">{{ elapsedLabel }}</p>
+            </div>
+          </div>
+
+          <div class="relative overflow-hidden rounded-[28px] border border-apple-blue/15 bg-[radial-gradient(circle_at_top,#60a5fa18,transparent_52%),linear-gradient(135deg,rgba(255,255,255,0.9),rgba(255,255,255,0.55))] dark:bg-[radial-gradient(circle_at_top,#60a5fa24,transparent_52%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(15,23,42,0.8))] p-5">
+            <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-apple-blue/60 to-transparent"></div>
+            <div class="flex items-end gap-2 h-24">
+              <div
+                v-for="bar in runtimePulseBars"
+                :key="bar.key"
+                class="runtime-pulse-bar"
+                :style="{ height: bar.height, animationDelay: bar.delay }"
+              ></div>
+            </div>
+            <div class="mt-4 flex items-center justify-between gap-4">
+              <div>
+                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Heartbeat</p>
+                <p class="mt-1 text-sm font-semibold text-apple-text">
+                  {{ store.status === 'running' ? '推理引擎心跳正常' : store.status === 'success' ? '已稳定落盘' : store.status === 'error' ? '等待重新发起' : '尚未激活' }}
+                </p>
+              </div>
+              <div class="w-28 h-28 rounded-full border border-white/70 dark:border-white/10 bg-white/60 dark:bg-white/5 backdrop-blur flex items-center justify-center shadow-[0_10px_40px_rgba(59,130,246,0.15)]">
+                <div class="relative w-14 h-14">
+                  <div class="absolute inset-0 rounded-full border-4 border-apple-blue/15"></div>
+                  <div class="absolute inset-[6px] rounded-full border-4 border-transparent border-t-apple-blue runtime-orbit"></div>
+                  <div class="absolute inset-0 flex items-center justify-center text-apple-blue">
+                    <Activity :size="20" :class="store.status === 'running' ? 'animate-pulse' : ''" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">阶段进度</p>
+              <p class="text-[11px] font-bold text-apple-text">{{ Math.round(stageProgress) }}%</p>
+            </div>
+            <div class="h-2 rounded-full bg-apple-background/70 overflow-hidden">
+              <div class="h-full rounded-full bg-gradient-to-r from-apple-blue via-cyan-400 to-violet-500 transition-all duration-700" :style="{ width: `${stageProgress}%` }"></div>
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="(stage, index) in stageItems"
+                :key="stage.label"
+                class="rounded-apple border px-4 py-3 transition-all"
+                :class="stage.state === 'done'
+                  ? 'border-emerald-500/20 bg-emerald-500/5'
+                  : stage.state === 'active'
+                    ? 'border-apple-blue/30 bg-apple-blue/5'
+                    : stage.state === 'error'
+                      ? 'border-red-500/20 bg-red-500/5'
+                      : 'border-apple-border bg-apple-background/35'"
+              >
+                <div class="flex items-start gap-3">
+                  <div
+                    class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                    :class="stage.state === 'done'
+                      ? 'bg-emerald-500 text-white'
+                      : stage.state === 'active'
+                        ? 'bg-apple-blue text-white'
+                        : stage.state === 'error'
+                          ? 'bg-red-500 text-white'
+                          : 'bg-apple-background text-apple-secondary-text'"
+                  >
+                    {{ index + 1 }}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <p class="text-xs font-bold text-apple-text">{{ stage.label }}</p>
+                      <span
+                        class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest"
+                        :class="stage.state === 'done'
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                          : stage.state === 'active'
+                            ? 'bg-apple-blue/10 text-apple-blue'
+                            : stage.state === 'error'
+                              ? 'bg-red-500/10 text-red-500'
+                              : 'bg-apple-background text-apple-secondary-text'"
+                      >
+                        {{ stage.state === 'done' ? 'Done' : stage.state === 'active' ? 'Active' : stage.state === 'error' ? 'Error' : 'Pending' }}
+                      </span>
+                    </div>
+                    <p class="mt-1 text-[11px] leading-relaxed text-apple-secondary-text">{{ stage.hint }}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 p-4">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">最近输出</p>
+              <div class="mt-3 space-y-2">
+                <p
+                  v-for="(line, index) in latestLogLines"
+                  :key="`${index}-${line}`"
+                  class="rounded-2xl bg-apple-background/60 px-3 py-2 text-[11px] leading-relaxed text-apple-secondary-text"
+                >
+                  {{ line }}
+                </p>
+                <p v-if="latestLogLines.length === 0" class="rounded-2xl bg-apple-background/60 px-3 py-2 text-[11px] text-apple-secondary-text">
+                  任务开始后，这里会滚动显示最新几条运行日志。
+                </p>
+              </div>
+            </div>
+            <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">实时控制台</p>
+                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
+                  <span class="inline-flex h-2 w-2 rounded-full bg-emerald-500" :class="store.status === 'running' ? 'animate-pulse' : ''"></span>
+                  <span>{{ logTimestampLabel }}</span>
+                </div>
+              </div>
+              <div
+                ref="consoleViewport"
+                class="mt-3 h-[260px] overflow-y-auto rounded-[24px] bg-slate-950 px-4 py-4 font-mono text-[11px] leading-6 text-emerald-300 shadow-inner"
+                @scroll="handleLogScroll"
+              >
+                <template v-if="runtimeLogLines.length">
+                  <p
+                    v-for="(line, index) in runtimeLogLines"
+                    :key="`${index}-${line}`"
+                    class="whitespace-pre-wrap break-words"
+                  >
+                    <span class="text-slate-500 mr-3 select-none">{{ String(index + 1).padStart(3, '0') }}</span>{{ line }}
+                  </p>
+                </template>
+                <p v-else class="text-slate-400">[console] 等待任务输出...</p>
+              </div>
+              <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-apple-secondary-text">
+                <span>自动滚动：{{ autoScrollLogs ? '开启' : '暂停' }}</span>
+                <button
+                  type="button"
+                  class="rounded-full border border-apple-border px-3 py-1 font-bold text-apple-text transition-colors hover:bg-apple-background"
+                  @click="refreshLogs"
+                >
+                  刷新日志
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -591,6 +1049,45 @@ onUnmounted(() => {
                   <p>加速: {{ store.useAcceleration ? '启用' : '关闭' }}</p>
                   <p>链数: {{ store.targetChains || '自动' }}</p>
                   <p class="mt-2">环境描述: {{ envLength ? `${envLength} 字` : '未填写' }}</p>
+                </div>
+              </div>
+
+              <div class="space-y-3">
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">确认入库</label>
+                <div class="rounded-apple border border-apple-border bg-white/50 dark:bg-white/5 p-4 space-y-3">
+                  <input
+                    v-model="libraryEntryName"
+                    type="text"
+                    class="apple-input text-xs"
+                    placeholder="例如：线粒体酶候选体 A"
+                  />
+                  <p class="text-[11px] leading-relaxed text-apple-secondary-text">
+                    只有在你确认并命名后，这次 MiniFold 结果才会进入“预测成果库”，不会和 accession 导入条目混在一起。
+                  </p>
+                  <p v-if="saveToLibraryError" class="text-[11px] font-bold text-red-500">{{ saveToLibraryError }}</p>
+                  <div v-if="savedLibraryEntry" class="rounded-apple border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+                    已入库为「{{ savedLibraryEntry.proteinName }}」，编号 {{ savedLibraryEntry.code }}。
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      class="apple-button-primary !py-2 !px-4 text-xs flex items-center gap-2 disabled:opacity-50"
+                      :disabled="isSavingToLibrary || !store.lastStructureText"
+                      @click="handleSaveToLibrary"
+                    >
+                      <Loader2 v-if="isSavingToLibrary" :size="14" class="animate-spin" />
+                      <FolderPlus v-else :size="14" />
+                      确认入库
+                    </button>
+                    <button
+                      v-if="savedLibraryEntry"
+                      type="button"
+                      class="apple-button-secondary !py-2 !px-4 text-xs"
+                      @click="router.push({ path: '/library/predicted', query: { enzymeId: String(savedLibraryEntry.id) } })"
+                    >
+                      前往预测成果库
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -667,3 +1164,38 @@ onUnmounted(() => {
     </transition>
   </div>
 </template>
+
+<style scoped>
+.runtime-pulse-bar {
+  width: calc((100% - 22px) / 12);
+  border-radius: 9999px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.95), rgba(45, 212, 191, 0.85));
+  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.2);
+  transform-origin: bottom;
+  animation: runtimePulse 1.8s ease-in-out infinite;
+}
+
+.runtime-orbit {
+  animation: runtimeOrbit 1.6s linear infinite;
+}
+
+@keyframes runtimePulse {
+  0%, 100% {
+    transform: scaleY(0.7);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1.05);
+    opacity: 1;
+  }
+}
+
+@keyframes runtimeOrbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+</style>

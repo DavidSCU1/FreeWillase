@@ -1,0 +1,171 @@
+{
+  "cases": [
+    {
+      "idx": 0,
+      "chains": 4,
+      "avg": 0.5,
+      "med": 1.0,
+      "models": [
+        {
+          "model": "doubao-seed-1-6-251015",
+          "p": 1.0,
+          "w": 0.2
+        },
+        {
+          "model": "doubao-1-5-thinking-pro-250415",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-1-5-think"
+        },
+        {
+          "model": "deepseek-v3-2-251201",
+          "p": 0.0,
+          "w": 0.2
+        },
+        {
+          "model": "kimi-k2-thinking-251104",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint kimi-k2-thinking"
+        },
+        {
+          "model": "deepseek-r1-250528",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint deepseek-r1-2505"
+        }
+      ]
+    },
+    {
+      "idx": 1,
+      "chains": 4,
+      "avg": 0.6000000000000001,
+      "med": 0.8,
+      "models": [
+        {
+          "model": "doubao-seed-1-6-251015",
+          "p": 0.8,
+          "w": 0.2
+        },
+        {
+          "model": "doubao-1-5-thinking-pro-250415",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-1-5-think"
+        },
+        {
+          "model": "deepseek-v3-2-251201",
+          "p": 0.4,
+          "w": 0.2
+        },
+        {
+          "model": "kimi-k2-thinking-251104",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint kimi-k2-thinking"
+        },
+        {
+          "model": "deepseek-r1-250528",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint deepseek-r1-2505"
+        }
+      ]
+    },
+    {
+      "idx": 2,
+      "chains": 4,
+      "avg": 0.44999999999999996,
+      "med": 0.6,
+      "models": [
+        {
+          "model": "doubao-seed-1-6-251015",
+          "p": 0.6,
+          "w": 0.2
+        },
+        {
+          "model": "doubao-1-5-thinking-pro-250415",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-1-5-think"
+        },
+        {
+          "model": "deepseek-v3-2-251201",
+          "p": 0.3,
+          "w": 0.2
+        },
+        {
+          "model": "kimi-k2-thinking-251104",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint kimi-k2-thinking"
+        },
+        {
+          "model": "deepseek-r1-250528",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint deepseek-r1-2505"
+        }
+      ]
+    },
+    {
+      "idx": 3,
+      "chains": 4,
+      "avg": 0.35000000000000003,
+      "med": 0.5,
+      "models": [
+        {
+          "model": "doubao-seed-1-6-251015",
+          "p": 0.5,
+          "w": 0.2
+        },
+        {
+          "model": "doubao-1-5-thinking-pro-250415",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-1-5-think"
+        },
+        {
+          "model": "deepseek-v3-2-251201",
+          "p": 0.2,
+          "w": 0.2
+        },
+        {
+          "model": "kimi-k2-thinking-251104",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint kimi-k2-thinking"
+        },
+        {
+          "model": "deepseek-r1-250528",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint deepseek-r1-2505"
+        }
+      ]
+    },
+    {
+      "idx": 4,
+      "chains": 4,
+      "avg": 0.6,
+      "med": 1.0,
+      "models": [
+        {
+          "model": "doubao-seed-1-6-251015",
+          "p": 1.0,
+          "w": 0.2
+        },
+        {
+          "model": "doubao-1-5-thinking-pro-250415",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-1-5-think"
+        },
+        {
+          "model": "deepseek-v3-2-251201",
+          "p": 0.2,
+          "w": 0.2
+        },
+        {
+          "model": "kimi-k2-thinking-251104",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint kimi-k2-thinking"
+        },
+        {
+          "model": "deepseek-r1-250528",
+          "p": -1.0,
+          "error": "HTTP 404: {\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint deepseek-r1-2505"
+        }
+      ]
+    }
+  ],
+  "best_idx": 4,
+  "best_score": 0.8
+}

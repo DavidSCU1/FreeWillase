@@ -52,6 +52,8 @@ public class PredictionService {
             command.add("--payload");
             command.add(payloadPath.toString());
 
+            log.info("Launching MiniFold command for task {}: {}", taskId, command);
+
             Path launchLog = taskDir.resolve("launcher.log");
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(getProjectRoot().toFile());
@@ -143,9 +145,18 @@ public class PredictionService {
     }
 
     private List<String> resolvePythonCommand(MiniFoldPredictionRequest request) {
-        String condaEnvName = defaultString(request.getCondaEnvName()).trim();
-        if (!condaEnvName.isEmpty()) {
-            List<String> condaCommand = buildCondaPythonCommand(condaEnvName);
+        String pythonOrEnv = stripWrappingQuotes(defaultString(request.getCondaEnvName()).trim());
+        if (!pythonOrEnv.isEmpty()) {
+            List<String> directPython = resolveDirectPythonCommand(pythonOrEnv);
+            if (directPython != null) {
+                if (isPythonAvailable(directPython)) {
+                    return directPython;
+                }
+                throw new IllegalStateException("无法使用指定的 Python 可执行文件 `" + pythonOrEnv
+                        + "`，请确认路径存在且可运行 `python --version`");
+            }
+
+            List<String> condaCommand = buildCondaPythonCommand(pythonOrEnv);
             if (isPythonAvailable(condaCommand)) {
                 return condaCommand;
             }
@@ -153,12 +164,16 @@ public class PredictionService {
             String detail = isCondaAvailable()
                     ? "请确认环境名是否存在且可运行 `python`"
                     : "请确认当前系统可直接调用 conda";
-            throw new IllegalStateException("无法使用指定的 Conda 环境 `" + condaEnvName + "`，" + detail);
+            throw new IllegalStateException("无法使用指定的 Conda 环境 `" + pythonOrEnv + "`，" + detail);
         }
 
-        String configured = System.getenv("MINIFOLD_PYTHON");
-        if (configured != null && !configured.isBlank()) {
-            return List.of(configured.trim());
+        String configured = stripWrappingQuotes(defaultString(System.getenv("MINIFOLD_PYTHON")).trim());
+        if (!configured.isEmpty()) {
+            List<String> configuredCommand = List.of(configured);
+            if (isPythonAvailable(configuredCommand)) {
+                return configuredCommand;
+            }
+            log.warn("Configured MINIFOLD_PYTHON is unavailable, falling back to system discovery: {}", configured);
         }
 
         List<List<String>> candidates = List.of(
@@ -174,6 +189,13 @@ public class PredictionService {
         }
 
         throw new IllegalStateException("未找到可用的 Python 解释器，请安装 Python 或设置环境变量 MINIFOLD_PYTHON");
+    }
+
+    private List<String> resolveDirectPythonCommand(String value) {
+        if (!looksLikePythonPath(value)) {
+            return null;
+        }
+        return List.of(value);
     }
 
     private List<String> buildCondaPythonCommand(String condaEnvName) {
@@ -215,6 +237,17 @@ public class PredictionService {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
+    private boolean looksLikePythonPath(String value) {
+        String normalized = value.toLowerCase();
+        boolean hasWindowsDrivePrefix = normalized.length() > 1
+                && Character.isLetter(normalized.charAt(0))
+                && normalized.charAt(1) == ':';
+        return normalized.contains("\\")
+                || normalized.contains("/")
+                || normalized.endsWith(".exe")
+                || hasWindowsDrivePrefix;
+    }
+
     private Path getProjectRoot() {
         return Paths.get("").toAbsolutePath().normalize();
     }
@@ -237,5 +270,16 @@ public class PredictionService {
 
     private String defaultString(String value) {
         return value == null ? "" : value;
+    }
+
+    private String stripWrappingQuotes(String value) {
+        if (value == null || value.length() < 2) {
+            return defaultString(value);
+        }
+        if ((value.startsWith("\"") && value.endsWith("\""))
+                || (value.startsWith("'") && value.endsWith("'"))) {
+            return value.substring(1, value.length() - 1).trim();
+        }
+        return value;
     }
 }

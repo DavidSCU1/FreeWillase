@@ -26,20 +26,24 @@ if %ERRORLEVEL% NEQ 0 (
 :: 2. Embedded MiniFold Runtime Check
 echo [2/5] Checking Embedded MiniFold Runtime...
 cd /d %~dp0
-where python >nul 2>nul
-set PYTHON_CMD=python
-if %ERRORLEVEL% NEQ 0 (
-    where python3 >nul 2>nul
-    if %ERRORLEVEL% EQU 0 (
-        set PYTHON_CMD=python3
-    ) else (
-        echo [ERROR] Python not found. Please install Python.
-        pause
-        exit /b 1
+set "PYTHON_CMD="
+for /f "delims=" %%i in ('where python 2^>nul') do (
+    if not defined PYTHON_CMD set "PYTHON_CMD=%%i"
+)
+if not defined PYTHON_CMD (
+    for /f "delims=" %%i in ('where python3 2^>nul') do (
+        if not defined PYTHON_CMD set "PYTHON_CMD=%%i"
     )
 )
+if not defined PYTHON_CMD (
+    echo [ERROR] Python not found. Please install Python.
+    pause
+    exit /b 1
+)
+set "MINIFOLD_PYTHON=%PYTHON_CMD%"
 
-echo  - Python runtime detected: %PYTHON_CMD%
+echo  - Python runtime detected: %MINIFOLD_PYTHON%
+echo  - MINIFOLD_PYTHON exported for Spring Boot
 echo  - MiniFold will run in embedded process mode from Spring Boot
 
 :: 3. Java Backend Setup (Maven)

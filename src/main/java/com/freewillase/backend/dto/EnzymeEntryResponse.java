@@ -9,9 +9,12 @@ import java.time.LocalDateTime;
 @Builder
 public class EnzymeEntryResponse {
     Long id;
+    String code;
+    String sourceType;
     String accession;
     String proteinName;
     String organismName;
+    String description;
     String taxId;
     Integer sequenceLength;
     String sequenceHash;

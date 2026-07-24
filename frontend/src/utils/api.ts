@@ -18,20 +18,37 @@ interface RnaFoldRequest {
   sequence: string
 }
 
+interface SaveMiniFoldEnzymeRequest {
+  name: string
+  sequence: string
+  pdb: string
+  taskId?: string
+  envText?: string
+  targetChains?: number
+  backend?: string
+  useAcceleration?: boolean
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token')
+  const headers = new Headers(init?.headers)
+
+  if (!(init?.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
   const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
     ...init,
+    headers,
   })
 
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     localStorage.removeItem('token')
     window.location.href = '/login'
-    throw new Error('未授权，请重新登录')
+    throw new Error(response.status === 401 ? '未授权，请重新登录' : '登录状态已失效或无权访问，请重新登录')
   }
 
   if (!response.ok) {
@@ -40,12 +57,20 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     try {
       if (text) {
         const body = JSON.parse(text)
-        message = body?.message ?? message
+        message = body?.message ?? body?.error ?? message
       }
     } catch (e) {
       message = text || message
     }
-    throw new Error(message)
+    console.error('[API] request failed', {
+      url,
+      status: response.status,
+      statusText: response.statusText,
+      hasToken: Boolean(token),
+      message,
+      responseText: text,
+    })
+    throw new Error(text?.trim() || message)
   }
 
   const text = await response.text()
@@ -91,8 +116,9 @@ export async function getLatestImportTask() {
   return JSON.parse(text) as ImportTask
 }
 
-export function listEnzymes() {
-  return request<EnzymeEntry[]>('/api/enzymes')
+export function listEnzymes(sourceType?: string) {
+  const query = sourceType ? `?sourceType=${encodeURIComponent(sourceType)}` : ''
+  return request<EnzymeEntry[]>(`/api/enzymes${query}`)
 }
 
 export function deleteEnzyme(id: number) {
@@ -110,6 +136,17 @@ export function matchLiterature(enzymeId: number, payload: MatchRequest) {
 
 export function getEnzymeLiteratures(enzymeId: number) {
   return request<LiteratureRecord[]>(`/api/enzymes/${enzymeId}/literatures`)
+}
+
+export function getEnzymeStructure(enzymeId: number) {
+  return request<string>(`/api/enzymes/${enzymeId}/structure`)
+}
+
+export function saveMiniFoldEnzyme(payload: SaveMiniFoldEnzymeRequest) {
+  return request<EnzymeEntry>('/api/enzymes/predicted/minifold', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function importEnzymeLiteratureFile(enzymeId: number, filePath: string) {

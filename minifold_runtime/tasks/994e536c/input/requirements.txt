@@ -1,0 +1,2 @@
+env=细菌内部酶
+target_chains=4

@@ -4,9 +4,12 @@ import com.freewillase.backend.domain.LiteratureRecord;
 import com.freewillase.backend.dto.MatchLiteratureRequest;
 import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportLiteratureFileRequest;
+import com.freewillase.backend.dto.SaveMiniFoldEnzymeRequest;
 import com.freewillase.backend.service.LiteratureMatchService;
 import com.freewillase.backend.service.NcbiImportService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,8 +24,24 @@ public class EnzymeController {
     private final LiteratureMatchService literatureMatchService;
 
     @GetMapping
-    public List<EnzymeEntryResponse> listEnzymes() {
-        return ncbiImportService.listEnzymes();
+    public List<EnzymeEntryResponse> listEnzymes(@RequestParam(required = false) String sourceType) {
+        return ncbiImportService.listEnzymes(sourceType);
+    }
+
+    @PostMapping("/predicted/minifold")
+    public EnzymeEntryResponse saveMiniFoldPrediction(@RequestBody SaveMiniFoldEnzymeRequest request) {
+        return ncbiImportService.saveMiniFoldResult(request);
+    }
+
+    @GetMapping("/{id}/structure")
+    public ResponseEntity<String> getStructure(@PathVariable Long id) {
+        String structure = ncbiImportService.getStructureContent(id);
+        if (structure == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(structure);
     }
 
     @PostMapping("/{id}/match")

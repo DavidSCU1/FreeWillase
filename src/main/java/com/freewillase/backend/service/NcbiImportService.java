@@ -10,6 +10,7 @@ import com.freewillase.backend.domain.NcbiImportTaskItem;
 import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportTaskItemResponse;
 import com.freewillase.backend.dto.ImportTaskResponse;
+import com.freewillase.backend.dto.SaveMiniFoldEnzymeRequest;
 import com.freewillase.backend.mapper.EnzymeCrossRefMapper;
 import com.freewillase.backend.mapper.EnzymeEntryMapper;
 import com.freewillase.backend.mapper.EnzymeSequenceMapper;
@@ -23,21 +24,30 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
 public class NcbiImportService {
+
+    public static final String SOURCE_TYPE_NCBI_IMPORT = "NCBI_IMPORT";
+    public static final String SOURCE_TYPE_MINIFOLD_PREDICTION = "MINIFOLD_PREDICTION";
 
     private final NcbiEutilsClient ncbiEutilsClient;
     private final UniProtClient uniProtClient;
@@ -133,6 +143,7 @@ public class NcbiImportService {
                         .organism(result.getOrganism())
                         .taxId(result.getTaxId())
                         .description(enrichment.map(UniProtClient.ProteinEnrichment::getFunctionSummary).orElse(null))
+                        .sourceType(SOURCE_TYPE_NCBI_IMPORT)
                         .status("ACTIVE")
                         .createdAt(LocalDateTime.now())
                         .updatedAt(LocalDateTime.now())
@@ -204,9 +215,14 @@ public class NcbiImportService {
         return toTaskResponse(task, items);
     }
 
-    public List<EnzymeEntryResponse> listEnzymes() {
-        List<EnzymeEntry> entries = enzymeEntryMapper.selectList(new LambdaQueryWrapper<EnzymeEntry>()
-                .orderByDesc(EnzymeEntry::getCreatedAt));
+    public List<EnzymeEntryResponse> listEnzymes(String sourceType) {
+        LambdaQueryWrapper<EnzymeEntry> query = new LambdaQueryWrapper<EnzymeEntry>()
+                .orderByDesc(EnzymeEntry::getCreatedAt);
+        if (sourceType != null && !sourceType.isBlank()) {
+            query.eq(EnzymeEntry::getSourceType, sourceType.trim());
+        }
+
+        List<EnzymeEntry> entries = enzymeEntryMapper.selectList(query);
         Map<Long, EnzymeSequence> primarySequences = loadPrimarySequences(entries);
         Map<Long, EnzymeStructure> primaryStructures = loadPrimaryStructures(entries);
         Map<Long, Map<String, EnzymeCrossRef>> primaryCrossRefs = loadPrimaryCrossRefs(entries);
@@ -222,9 +238,12 @@ public class NcbiImportService {
 
                     return EnzymeEntryResponse.builder()
                             .id(entry.getId())
-                            .accession(entry.getProteinAccession())
+                            .code(entry.getCode())
+                            .sourceType(entry.getSourceType())
+                            .accession(readDisplayAccession(entry))
                             .proteinName(entry.getName())
                             .organismName(entry.getOrganism())
+                            .description(entry.getDescription())
                             .taxId(entry.getTaxId())
                             .sequenceLength(readSequenceLength(primarySequences.get(entry.getId())))
                             .sequenceHash(readSequenceHash(primarySequences.get(entry.getId())))
@@ -245,7 +264,82 @@ public class NcbiImportService {
     }
 
     @Transactional
+    public EnzymeEntryResponse saveMiniFoldResult(SaveMiniFoldEnzymeRequest request) {
+        validateMiniFoldSaveRequest(request);
+
+        String taskId = defaultString(request.getTaskId()).trim();
+        if (!taskId.isEmpty()) {
+            EnzymeCrossRef existingTaskRef = enzymeCrossRefMapper.selectOne(new LambdaQueryWrapper<EnzymeCrossRef>()
+                    .eq(EnzymeCrossRef::getRefDb, "MINIFOLD")
+                    .eq(EnzymeCrossRef::getRefType, "TASK_ID")
+                    .eq(EnzymeCrossRef::getRefValue, taskId)
+                    .last("LIMIT 1"));
+            if (existingTaskRef != null) {
+                return getEnzymeResponse(existingTaskRef.getEnzymeId());
+            }
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        EnzymeEntry entry = EnzymeEntry.builder()
+                .code("PRED_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                .name(request.getName().trim())
+                .organism("MiniFold 本地预测")
+                .description(buildMiniFoldDescription(request))
+                .sourceType(SOURCE_TYPE_MINIFOLD_PREDICTION)
+                .status("ACTIVE")
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        enzymeEntryMapper.insert(entry);
+
+        String normalizedSequence = normalizeSequence(request.getSequence());
+        savePrimarySequence(entry.getId(), normalizedSequence, normalizedSequence.length(), "MINIFOLD");
+        writeMiniFoldStructureFile(entry.getCode(), request.getPdb());
+        saveStructure(
+                entry.getId(),
+                "PREDICTED",
+                taskId.isEmpty() ? entry.getCode() : taskId,
+                "MiniFold",
+                "/api/enzymes/" + entry.getId() + "/structure",
+                1
+        );
+        saveCrossReference(entry.getId(), "MINIFOLD", "TASK_ID", taskId, null, 1);
+
+        return getEnzymeResponse(entry.getId());
+    }
+
+    public String getStructureContent(Long enzymeId) {
+        EnzymeEntry entry = enzymeEntryMapper.selectById(enzymeId);
+        if (entry == null) {
+            return null;
+        }
+        Path structurePath = getStoredStructurePath(entry);
+        if (structurePath == null || !Files.exists(structurePath)) {
+            return null;
+        }
+        try {
+            return Files.readString(structurePath, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException("读取结构文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    public EnzymeEntryResponse getEnzymeResponse(Long enzymeId) {
+        EnzymeEntry entry = enzymeEntryMapper.selectById(enzymeId);
+        if (entry == null) {
+            throw new IllegalArgumentException("未找到酶条目: " + enzymeId);
+        }
+        return listEnzymes(null)
+                .stream()
+                .filter(item -> enzymeId.equals(item.getId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("未找到酶条目: " + enzymeId));
+    }
+
+    @Transactional
     public void deleteEnzyme(Long id) {
+        EnzymeEntry entry = enzymeEntryMapper.selectById(id);
+
         // 1. Delete literature relations
         relationMapper.delete(new LambdaQueryWrapper<com.freewillase.backend.domain.LiteratureRelation>()
                 .eq(com.freewillase.backend.domain.LiteratureRelation::getEnzymeId, id));
@@ -264,6 +358,8 @@ public class NcbiImportService {
 
         // 5. Delete enzyme entry
         enzymeEntryMapper.deleteById(id);
+
+        deleteStoredStructure(entry);
 
         log.info("Deleted enzyme entry and related data for ID: {}", id);
     }
@@ -454,6 +550,16 @@ public class NcbiImportService {
         return structure == null ? null : structure.getSourceUrl();
     }
 
+    private String readDisplayAccession(EnzymeEntry entry) {
+        if (entry == null) {
+            return null;
+        }
+        if (entry.getProteinAccession() != null && !entry.getProteinAccession().isBlank()) {
+            return entry.getProteinAccession();
+        }
+        return entry.getCode();
+    }
+
     private String readCrossRefValue(EnzymeCrossRef ref) {
         return ref == null ? null : ref.getRefValue();
     }
@@ -581,6 +687,101 @@ public class NcbiImportService {
 
     private String normalizeAccession(String accession) {
         return accession == null ? "" : accession.trim().toUpperCase();
+    }
+
+    private String normalizeSequence(String sequence) {
+        return defaultString(sequence).replaceAll("\\s+", "").toUpperCase();
+    }
+
+    private void validateMiniFoldSaveRequest(SaveMiniFoldEnzymeRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("缺少 MiniFold 入库数据");
+        }
+        if (request.getName() == null || request.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("请先为预测结果起一个名字");
+        }
+        String sequence = normalizeSequence(request.getSequence());
+        if (sequence.isEmpty()) {
+            throw new IllegalArgumentException("预测序列不能为空");
+        }
+        if (request.getPdb() == null || request.getPdb().trim().isEmpty()) {
+            throw new IllegalArgumentException("MiniFold 结构内容为空，无法入库");
+        }
+    }
+
+    private String buildMiniFoldDescription(SaveMiniFoldEnzymeRequest request) {
+        List<String> summary = new java.util.ArrayList<>();
+        String taskId = defaultString(request.getTaskId()).trim();
+        if (!taskId.isEmpty()) {
+            summary.add("MiniFold Task: " + taskId);
+        }
+        if (request.getTargetChains() != null) {
+            summary.add("Target Chains: " + request.getTargetChains());
+        }
+        String backend = defaultString(request.getBackend()).trim();
+        if (!backend.isEmpty()) {
+            summary.add("Backend: " + backend);
+        }
+        if (request.getUseAcceleration() != null) {
+            summary.add("Acceleration: " + (request.getUseAcceleration() ? "enabled" : "disabled"));
+        }
+        String envText = defaultString(request.getEnvText()).trim();
+        if (!envText.isEmpty()) {
+            summary.add("Environment Notes: " + envText);
+        }
+        return summary.isEmpty() ? "MiniFold 本地预测结果，已由用户确认入库。" : String.join("\n", summary);
+    }
+
+    private void writeMiniFoldStructureFile(String entryCode, String pdb) {
+        try {
+            Path structurePath = getStoredStructurePath(entryCode);
+            Files.createDirectories(structurePath.getParent());
+            Files.writeString(structurePath, defaultString(pdb), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException("写入 MiniFold 结构文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    private Path getStoredStructurePath(EnzymeEntry entry) {
+        if (entry == null || entry.getCode() == null || entry.getCode().isBlank()) {
+            return null;
+        }
+        return getStoredStructurePath(entry.getCode());
+    }
+
+    private Path getStoredStructurePath(String entryCode) {
+        return getProjectRoot()
+                .resolve("api_output")
+                .resolve("library")
+                .resolve(entryCode)
+                .resolve("structure.pdb");
+    }
+
+    private void deleteStoredStructure(EnzymeEntry entry) {
+        Path structurePath = getStoredStructurePath(entry);
+        if (structurePath == null || !Files.exists(structurePath)) {
+            return;
+        }
+        Path libraryDir = structurePath.getParent();
+        try (Stream<Path> stream = Files.walk(libraryDir)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                    log.warn("Failed to delete path {}", path);
+                }
+            });
+        } catch (IOException e) {
+            log.warn("Failed to clean stored structure for enzyme {}", entry != null ? entry.getId() : null, e);
+        }
+    }
+
+    private Path getProjectRoot() {
+        return Paths.get("").toAbsolutePath().normalize();
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
     }
 
     private String calculateHash(String sequence) {

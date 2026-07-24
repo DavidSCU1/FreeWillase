@@ -1,0 +1,69 @@
+[15:19:56] Loaded environment file: D:\FreeWillase\minifold_runtime\.env.local
+[15:19:56] Loaded environment file: D:\FreeWillase\minifold_runtime\.env
+[15:19:56] ==== FreeWillase MiniFold Runtime Started ====
+[15:19:56] Sequence length: 59
+[15:19:56] Target chains: 4
+[15:19:56] Acceleration: enabled
+[15:19:56] Backend: directml
+[15:19:56] 读取 FASTA: D:\FreeWillase\minifold_runtime\tasks\07198b2d\input.fasta
+[15:19:56] 处理序列: task (长度 59)
+[15:19:56] 候选生成完成，尝试数 5，行数 5。
+[15:19:56]   [SS-Gen Log] Info: Using PyBioMed for AAIndex properties.
+[15:19:56]   [SS-Gen Log] Info: Enforcing target chain count = 4
+[Ark Vote] Case 1 Final: Avg=0.4250, Median=0.6500
+[Ark Vote] Case 2 Final: Avg=0.6500, Median=1.0000
+[Ark Vote] Case 3 Final: Avg=0.6000, Median=0.7000
+[Ark Vote] Case 4 Final: Avg=0.6000, Median=1.0000
+[Ark Vote] Case 5 Final: Avg=0.6500, Median=1.0000
+[15:20:38] Ark 投票完成：共尝试 5 个模型，成功 5 个，最佳分 0.82
+[15:20:38]   Case 1: Avg=0.42, Med=0.65
+[15:20:38]     - doubao-seed-1-6-251015: 0.65
+[15:20:38]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[15:20:38]     - deepseek-v3-2-251201: 0.20
+[15:20:38]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[15:20:38]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[15:20:38]   Case 2: Avg=0.65, Med=1.00
+[15:20:38]     - doubao-seed-1-6-251015: 1.00
+[15:20:38]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[15:20:38]     - deepseek-v3-2-251201: 0.30
+[15:20:38]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[15:20:38]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[15:20:38]   Case 3: Avg=0.60, Med=0.70
+[15:20:38]     - doubao-seed-1-6-251015: 0.50
+[15:20:38]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[15:20:38]     - deepseek-v3-2-251201: 0.70
+[15:20:38]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[15:20:38]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[15:20:38]   Case 4: Avg=0.60, Med=1.00
+[15:20:38]     - doubao-seed-1-6-251015: 1.00
+[15:20:38]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[15:20:38]     - deepseek-v3-2-251201: 0.20
+[15:20:38]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[15:20:38]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[15:20:38]   Case 5: Avg=0.65, Med=1.00
+[15:20:38]     - doubao-seed-1-6-251015: 1.00
+[15:20:38]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[15:20:38]     - deepseek-v3-2-251201: 0.30
+[15:20:38]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[15:20:38]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[15:20:38] 检测到环境描述，启动【主考官优化-重审】流程...
+[15:20:38]   选取初选前三名 (Cases [2, 5, 4]) 进行优化...
+[15:20:38]   [优化 1/3] 主考官 (doubao-seed-1-6-251015) 正在调整 Case 2 以适应环境...
+[15:20:38]   [优化 2/3] 主考官 (doubao-seed-1-6-251015) 正在调整 Case 5 以适应环境...
+[15:20:38]   [优化 3/3] 主考官 (doubao-seed-1-6-251015) 正在调整 Case 4 以适应环境...
+[15:21:42]   [重审] 4 位评审正在对 3 个优化后结构进行盲审...
+[Ark Vote] Case 1 Final: Avg=0.2000, Median=0.2000
+[Ark Vote] Case 2 Final: Avg=0.6000, Median=0.6000
+[Ark Vote] Case 3 Final: Avg=0.4000, Median=0.4000
+[15:21:44]   重审结果: 最高分 0.60
+[15:21:44]   >>> 最终优胜: Refined_from_Case_5 (Origin Case 5)
+[15:22:09] 功能注释完成。
+[15:22:09] 约束提取模块不可用，跳过物理约束。
+[15:22:09] 生成 3D 结构...
+[15:22:09]   > Case final (p=0.60): Optimizing backbone (iGPU, backend=directml)...
+[15:33:04]   > Refinement: Applied Ramachandran/OpenMM post-processing.
+Visualization saved to D:\FreeWillase\minifold_runtime\tasks\07198b2d\input\3d_structures\input_casefinal_model_1.html
+[15:33:04] 生成分析报告...
+[15:33:04] 报告已生成: D:\FreeWillase\minifold_runtime\tasks\07198b2d\input\input_report.md
+[15:33:04] ==== 所有任务已完成 ====
+[15:33:04] ==== FreeWillase MiniFold Runtime Finished ====

@@ -1,0 +1,14 @@
+[
+  {
+    "case": "final",
+    "p": 0.7,
+    "chains": 4,
+    "files": [
+      "input_final_1.fasta.txt",
+      "input_final_2.fasta.txt",
+      "input_final_3.fasta.txt",
+      "input_final_4.fasta.txt"
+    ],
+    "origin_case": 5
+  }
+]

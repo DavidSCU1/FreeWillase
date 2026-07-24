@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { 
   Search, 
   Filter, 
@@ -20,13 +20,14 @@ import {
   Upload,
   X
 } from 'lucide-vue-next'
-import { useNcbiImport } from '@/composables/useNcbiImport'
 import { useLiterature } from '@/composables/useLiterature'
 import StructureViewer from '@/components/StructureViewer.vue'
-import { downloadLiteratureAttachment } from '@/utils/api'
+import { deleteEnzyme, downloadLiteratureAttachment, getEnzymeStructure, listEnzymes } from '@/utils/api'
+import type { EnzymeEntry } from '@/types'
 
 const router = useRouter()
-const { enzymes, refreshEnzymeLibrary, removeEnzyme } = useNcbiImport()
+const route = useRoute()
+const enzymes = ref<EnzymeEntry[]>([])
 const {
   enzymeLiteratures,
   fetchEnzymeLiteratures,
@@ -44,15 +45,55 @@ const selectedLiteratureId = ref<number | null>(null)
 const downloadingAttachmentId = ref<number | null>(null)
 const importLiteratureFile = ref<File | null>(null)
 const importLiteratureError = ref('')
+const predictedStructureUrl = ref<string | null>(null)
+
+const libraryTabs = [
+  {
+    label: '导入酶库',
+    to: '/library/imported',
+    hint: 'Accession 导入',
+    sourceType: 'NCBI_IMPORT',
+  },
+  {
+    label: '预测成果库',
+    to: '/library/predicted',
+    hint: 'MiniFold 入库',
+    sourceType: 'MINIFOLD_PREDICTION',
+  },
+] as const
+
+const activeSourceType = computed(() => String(route.meta.librarySourceType || 'NCBI_IMPORT'))
+const isPredictedLibrary = computed(() => activeSourceType.value === 'MINIFOLD_PREDICTION')
+const libraryTitle = computed(() => String(route.meta.libraryTitle || '酶库中心'))
+const librarySubtitle = computed(() => String(route.meta.librarySubtitle || '管理、浏览与分析本地酶条目数据库'))
+const searchPlaceholder = computed(() => isPredictedLibrary.value ? '搜索内部编号或预测名称...' : '搜索 Accession 或蛋白名称...')
+const identifierLabel = computed(() => isPredictedLibrary.value ? '内部编号' : 'Accession')
+const selectedEntryBadge = computed(() => isPredictedLibrary.value ? 'MiniFold 入库条目' : 'Accession 导入条目')
+const emptyTitle = computed(() => isPredictedLibrary.value ? '还没有确认入库的预测结果' : '这里还没有 accession 导入条目')
+const emptyDescription = computed(() => isPredictedLibrary.value
+  ? '先去 MiniFold 工作台拿到结果，确认命名后再放进预测成果库，这里就会出现。'
+  : '请先从 NCBI Accession 导入，再回来浏览这批正式入库的酶条目。')
+
+function revokePredictedStructureUrl() {
+  if (!predictedStructureUrl.value) return
+  if (predictedStructureUrl.value.startsWith('blob:')) {
+    URL.revokeObjectURL(predictedStructureUrl.value)
+  }
+  predictedStructureUrl.value = null
+}
 
 async function handleDelete(id: number) {
   if (confirm('确定要放走这只酶吗？一旦放归野外（删除），它的自由意志就不再受你掌控了。')) {
     isDeleting.value = true
-    const success = await removeEnzyme(id)
-    if (success) {
+    try {
+      await deleteEnzyme(id)
       selectedId.value = null
+      await refreshEnzymeLibrary()
+    } catch (error) {
+      console.error('删除失败', error)
+    } finally {
+      isDeleting.value = false
     }
-    isDeleting.value = false
   }
 }
 
@@ -120,13 +161,30 @@ async function handleImportLiterature() {
   }
 }
 
+async function refreshEnzymeLibrary() {
+  enzymes.value = await listEnzymes(activeSourceType.value)
+}
+
+function applyRouteSelection() {
+  const routeEnzymeId = Number(route.query.enzymeId)
+  if (routeEnzymeId && enzymes.value.some(item => item.id === routeEnzymeId)) {
+    selectedId.value = routeEnzymeId
+    return
+  }
+  if (selectedId.value != null && enzymes.value.some(item => item.id === selectedId.value)) {
+    return
+  }
+  selectedId.value = enzymes.value[0]?.id ?? null
+}
+
 const filteredEnzymes = computed(() => {
   if (!searchQuery.value) return enzymes.value
   const q = searchQuery.value.toLowerCase()
   return enzymes.value.filter(e => 
-    e.accession.toLowerCase().includes(q) || 
-    e.proteinName.toLowerCase().includes(q) || 
-    e.organismName.toLowerCase().includes(q)
+    (e.accession || '').toLowerCase().includes(q) ||
+    (e.code || '').toLowerCase().includes(q) ||
+    (e.proteinName || '').toLowerCase().includes(q) ||
+    (e.organismName || '').toLowerCase().includes(q)
   )
 })
 
@@ -139,11 +197,13 @@ const selectedEnzyme = computed(() => {
 const selectedStructureId = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return ''
+  if (isPredictedLibrary.value) return enzyme.code || enzyme.structureId || 'MINIFOLD-LOCAL'
   return enzyme.structureId || enzyme.uniprotAccession || enzyme.accession
 })
 
 const selectedStructureUrl = computed(() => {
   const enzyme = selectedEnzyme.value
+  if (isPredictedLibrary.value) return predictedStructureUrl.value || undefined
   if (!enzyme?.structureUrl) return undefined
   if (enzyme.structureSourceDb === 'PDB' || enzyme.structureSourceDb === 'AlphaFold') return undefined
   return enzyme.structureUrl
@@ -151,6 +211,7 @@ const selectedStructureUrl = computed(() => {
 
 const selectedStructureSource = computed(() => {
   const enzyme = selectedEnzyme.value
+  if (isPredictedLibrary.value) return 'LOCAL'
   return enzyme?.structureSourceDb || 'AUTO'
 })
 
@@ -171,7 +232,8 @@ const selectedStructureType = computed(() => {
 
 const selectedStructureStatus = computed(() => {
   const enzyme = selectedEnzyme.value
-  if (!enzyme) return 'Auto-Retrieved'
+  if (!enzyme) return '等待加载'
+  if (isPredictedLibrary.value) return 'MiniFold 已确认入库'
   if (enzyme.structureSourceDb === 'PDB') return 'Experimental (PDB)'
   if (enzyme.structureSourceDb === 'AlphaFold') return 'Predicted (AlphaFold)'
   if (enzyme.structureSourceDb) return `Curated (${enzyme.structureSourceDb})`
@@ -180,11 +242,11 @@ const selectedStructureStatus = computed(() => {
 
 const selectedNcbiUrl = computed(() => {
   const enzyme = selectedEnzyme.value
-  if (!enzyme) return undefined
+  if (!enzyme || isPredictedLibrary.value) return undefined
   return enzyme.ncbiProteinUrl || (enzyme.accession ? `https://www.ncbi.nlm.nih.gov/protein/${enzyme.accession}` : undefined)
 })
 
-const selectedUniprotUrl = computed(() => selectedEnzyme.value?.uniprotUrl)
+const selectedUniprotUrl = computed(() => isPredictedLibrary.value ? undefined : selectedEnzyme.value?.uniprotUrl)
 const selectedLiterature = computed(() => {
   if (!enzymeLiteratures.value.length) return null
   if (selectedLiteratureId.value == null) return enzymeLiteratures.value[0]
@@ -194,7 +256,7 @@ const selectedLiterature = computed(() => {
 watch(
   () => selectedId.value,
   (id) => {
-    if (id) {
+    if (id && !isPredictedLibrary.value) {
       selectedLiteratureId.value = null
       fetchEnzymeLiteratures(id)
     }
@@ -211,9 +273,41 @@ watch(
 
 watch(
   () => enzymes.value,
-  (list) => {
-    if (list.length && selectedId.value == null) {
-      selectedId.value = list[0].id
+  () => {
+    applyRouteSelection()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.query.enzymeId,
+  () => {
+    applyRouteSelection()
+  },
+)
+
+watch(
+  () => activeSourceType.value,
+  async () => {
+    searchQuery.value = ''
+    selectedId.value = null
+    revokePredictedStructureUrl()
+    await refreshEnzymeLibrary()
+    applyRouteSelection()
+  },
+)
+
+watch(
+  () => [selectedEnzyme.value?.id, isPredictedLibrary.value] as const,
+  async ([enzymeId, predicted]) => {
+    revokePredictedStructureUrl()
+    if (!predicted || !enzymeId) return
+    try {
+      const structureText = await getEnzymeStructure(enzymeId)
+      const blob = new Blob([structureText], { type: 'text/plain' })
+      predictedStructureUrl.value = URL.createObjectURL(blob)
+    } catch (error) {
+      console.error('读取预测结构失败', error)
     }
   },
   { immediate: true },
@@ -223,12 +317,17 @@ onMounted(async () => {
   try {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
     await refreshEnzymeLibrary()
-    if (selectedId.value) {
+    applyRouteSelection()
+    if (selectedId.value && !isPredictedLibrary.value) {
       fetchEnzymeLiteratures(selectedId.value)
     }
   } catch {
     // Silent
   }
+})
+
+onUnmounted(() => {
+  revokePredictedStructureUrl()
 })
 </script>
 
@@ -236,9 +335,24 @@ onMounted(async () => {
   <div class="flex flex-col h-full space-y-8">
     <!-- Header with Search and Filter -->
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div class="space-y-1">
-        <h1 class="text-3xl font-bold tracking-tight text-apple-text">酶库中心</h1>
-        <p class="text-apple-secondary-text text-sm">管理、浏览与分析本地酶条目数据库</p>
+      <div class="space-y-3">
+        <div class="space-y-1">
+          <h1 class="text-3xl font-bold tracking-tight text-apple-text">{{ libraryTitle }}</h1>
+          <p class="text-apple-secondary-text text-sm">{{ librarySubtitle }}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="tab in libraryTabs"
+            :key="tab.to"
+            type="button"
+            class="rounded-apple border px-4 py-2 text-left transition-all"
+            :class="activeSourceType === tab.sourceType ? 'border-apple-blue bg-apple-blue/5 text-apple-blue' : 'border-apple-border text-apple-secondary-text hover:text-apple-text hover:bg-apple-background'"
+            @click="router.push(tab.to)"
+          >
+            <p class="text-xs font-bold">{{ tab.label }}</p>
+            <p class="text-[10px] uppercase tracking-widest">{{ tab.hint }}</p>
+          </button>
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <div class="relative w-64">
@@ -246,7 +360,7 @@ onMounted(async () => {
           <input 
             v-model="searchQuery"
             type="text" 
-            placeholder="搜索 Accession 或蛋白名称..." 
+            :placeholder="searchPlaceholder"
             class="apple-input pl-9 pr-4 py-2 text-xs"
           />
         </div>
@@ -277,7 +391,7 @@ onMounted(async () => {
             >
               <div class="flex justify-between items-start mb-1">
                 <span class="text-xs font-bold" :class="selectedEnzyme?.id === enzyme.id ? 'text-white' : 'text-apple-blue'">
-                  {{ enzyme.accession }}
+                  {{ isPredictedLibrary ? enzyme.code : enzyme.accession }}
                 </span>
                 <div class="flex items-center gap-2">
                   <span v-if="selectedEnzyme?.id === enzyme.id" class="text-[10px] font-medium opacity-70 italic">
@@ -317,7 +431,7 @@ onMounted(async () => {
             <div class="space-y-4 flex-1">
               <div class="flex items-center gap-3">
                 <span class="px-2 py-1 rounded-full bg-apple-blue/10 text-apple-blue text-[10px] font-bold uppercase tracking-widest">
-                  Active Entry
+                  {{ selectedEntryBadge }}
                 </span>
                 <span class="text-xs font-medium text-apple-secondary-text">ID: {{ selectedEnzyme.id }}</span>
               </div>
@@ -327,7 +441,7 @@ onMounted(async () => {
               <div class="flex flex-wrap gap-4 text-sm">
                 <div class="flex items-center gap-2 text-apple-secondary-text">
                   <Database :size="16" />
-                  <span>Accession: <span class="text-apple-text font-semibold">{{ selectedEnzyme.accession }}</span></span>
+                  <span>{{ identifierLabel }}: <span class="text-apple-text font-semibold">{{ isPredictedLibrary ? selectedEnzyme.code : selectedEnzyme.accession }}</span></span>
                 </div>
                 <div class="flex items-center gap-2 text-apple-secondary-text">
                   <Tag :size="16" />
@@ -386,21 +500,21 @@ onMounted(async () => {
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
                 <Database :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">NCBI</span>
+                  <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'SOURCE' : 'NCBI' }}</span>
               </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.ncbiProteinAccession || selectedEnzyme.accession }}</p>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? 'MiniFold Confirmed' : (selectedEnzyme.ncbiProteinAccession || selectedEnzyme.accession) }}</p>
             </div>
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
                 <Tag :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">UniProt</span>
+                <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'Library Code' : 'UniProt' }}</span>
               </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.uniprotAccession || '-' }}</p>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? selectedEnzyme.code : (selectedEnzyme.uniprotAccession || '-') }}</p>
             </div>
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
                 <Dna :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">PDB</span>
+                <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'Structure' : 'PDB' }}</span>
               </div>
               <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.pdbId || selectedEnzyme.structureId || '-' }}</p>
             </div>
@@ -434,6 +548,11 @@ onMounted(async () => {
             >
               查看 PDB 页面
             </a>
+          </div>
+
+          <div v-if="selectedEnzyme.description" class="mt-6 rounded-apple border border-apple-border bg-apple-background/35 p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">说明</p>
+            <p class="mt-2 text-sm leading-6 text-apple-text whitespace-pre-wrap">{{ selectedEnzyme.description }}</p>
           </div>
         </div>
 
@@ -496,7 +615,7 @@ onMounted(async () => {
           </div>
 
           <!-- Literature Section -->
-          <div class="apple-card p-6">
+          <div v-if="!isPredictedLibrary" class="apple-card p-6">
             <div class="flex items-center justify-between mb-6">
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center">
@@ -644,6 +763,45 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+
+          <div v-else class="apple-card p-6">
+            <div class="flex items-center gap-3 mb-6">
+              <div class="w-8 h-8 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center">
+                <Sparkles :size="16" />
+              </div>
+              <h3 class="text-sm font-bold text-apple-text">预测入库说明</h3>
+            </div>
+
+            <div class="space-y-4">
+              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前来源</p>
+                <p class="mt-2 text-sm font-semibold text-apple-text">MiniFold 本地预测结果</p>
+                <p class="mt-2 text-xs leading-6 text-apple-secondary-text">
+                  这个页面只保留已经由你确认命名并正式入库的预测结构。它们和 accession 导入条目分仓管理，避免后续检索、展示和结构判断时互相干扰。
+                </p>
+              </div>
+
+              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">建议下一步</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-4 text-xs"
+                    @click="router.push('/prediction/minifold')"
+                  >
+                    回到 MiniFold 工作台
+                  </button>
+                  <button
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-4 text-xs"
+                    @click="router.push('/library/imported')"
+                  >
+                    查看导入酶库
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -651,8 +809,8 @@ onMounted(async () => {
         <div class="w-20 h-20 bg-apple-light-gray dark:bg-white/5 rounded-full flex items-center justify-center mb-6 text-apple-secondary-text opacity-20">
           <FlaskConical :size="40" />
         </div>
-        <h3 class="text-lg font-bold text-apple-text mb-2">捕获一只野生的酶</h3>
-        <p class="text-sm text-apple-secondary-text max-w-xs text-center">请从左侧列表点选一个受害者，我们将在这里剥开它的“自由意志”，看看它的序列、结构和被文献实锤的证据。</p>
+        <h3 class="text-lg font-bold text-apple-text mb-2">{{ emptyTitle }}</h3>
+        <p class="text-sm text-apple-secondary-text max-w-xs text-center">{{ emptyDescription }}</p>
       </div>
     </div>
 

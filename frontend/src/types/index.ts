@@ -20,9 +20,12 @@ export interface ImportTask {
 
 export interface EnzymeEntry {
   id: number
+  code: string
+  sourceType: string
   accession: string
   proteinName: string
   organismName: string
+  description?: string
   taxId?: string
   sequenceLength: number
   sequenceHash: string

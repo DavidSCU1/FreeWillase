@@ -1,0 +1,42 @@
+[
+  {
+    "chains": [
+      "CCCEHCCECCCCHCCCE",
+      "H",
+      "H",
+      "HCECCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    ]
+  },
+  {
+    "chains": [
+      "CCECE",
+      "H",
+      "EECCCCECCCCCCEEH",
+      "EHEECCCCEHHCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    ]
+  },
+  {
+    "chains": [
+      "EHCECCECECCCCHCE",
+      "ECCCH",
+      "HCECE",
+      "ECCHHCECCCCCCCCCCCCCCCCCCCCCCCCCC"
+    ]
+  },
+  {
+    "chains": [
+      "CCCCCHCCCCCHCE",
+      "H",
+      "HCECHCHHE",
+      "HHECCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    ]
+  },
+  {
+    "chains": [
+      "CCHECCHCCCHHECH",
+      "HCE",
+      "E",
+      "ECCCCCCECCCHCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    ]
+  }
+]

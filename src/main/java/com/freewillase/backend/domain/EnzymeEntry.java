@@ -33,6 +33,7 @@ public class EnzymeEntry {
     private String optimalPh;
     private String optimalTemperature;
     private String description;
+    private String sourceType;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

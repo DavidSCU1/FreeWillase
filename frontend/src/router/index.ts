@@ -32,7 +32,27 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/library',
     name: 'library',
+    redirect: '/library/imported',
+  },
+  {
+    path: '/library/imported',
+    name: 'library-imported',
     component: EnzymesPage,
+    meta: {
+      librarySourceType: 'NCBI_IMPORT',
+      libraryTitle: '导入酶库',
+      librarySubtitle: '只展示由 accession 导入的酶条目，方便继续看结构、补文献和做后续整理。',
+    },
+  },
+  {
+    path: '/library/predicted',
+    name: 'library-predicted',
+    component: EnzymesPage,
+    meta: {
+      librarySourceType: 'MINIFOLD_PREDICTION',
+      libraryTitle: '预测成果库',
+      librarySubtitle: '只展示已经过你确认并正式入库的 MiniFold 预测结果，不和 accession 导入条目混放。',
+    },
   },
   {
     path: '/matcher',

@@ -1,0 +1,8 @@
+{
+  "sequence" : "PIAQIHILEGRSDEQKETLIREVSEAISRSLDAPLTSVRVIITEMAKGHFGIGGELASKVRR",
+  "envText" : "细菌内部酶",
+  "targetChains" : 4,
+  "useIgpu" : true,
+  "backend" : "directml",
+  "condaEnvName" : "D:\\Program Files (x86)\\Boost\\python.exe"
+}

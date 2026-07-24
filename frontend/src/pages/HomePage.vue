@@ -75,7 +75,7 @@ const features = [
               开始导入 Accession
               <ArrowRight :size="16" />
             </RouterLink>
-            <RouterLink to="/library" class="apple-button-secondary">
+            <RouterLink to="/library/imported" class="apple-button-secondary">
               浏览酶库中心
             </RouterLink>
           </div>
