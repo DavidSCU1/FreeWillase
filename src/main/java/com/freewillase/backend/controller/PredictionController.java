@@ -18,9 +18,6 @@ public class PredictionController {
         if (request.getSequence() == null || request.getSequence().isEmpty()) {
             throw new IllegalArgumentException("序列不能为空");
         }
-        if (request.getApiKey() == null || request.getApiKey().isEmpty()) {
-            throw new IllegalArgumentException("火山 API Key 不能为空");
-        }
         return predictionService.predictWithMiniFold(request);
     }
 

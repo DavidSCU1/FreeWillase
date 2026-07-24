@@ -11,8 +11,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class MiniFoldPredictionRequest {
     private String sequence;
-    private String apiKey;
     private String envText;
-    private Integer ssn;
-    private Double threshold;
+    private Integer targetChains;
+    private Boolean useIgpu;
+    private String backend;
 }

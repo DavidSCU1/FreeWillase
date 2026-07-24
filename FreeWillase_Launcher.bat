@@ -23,9 +23,9 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
-:: 2. MiniFold API Setup
-echo [2/5] Setting up MiniFold API Environment...
-cd /d %~dp0MiniFold
+:: 2. Embedded MiniFold Runtime Check
+echo [2/5] Checking Embedded MiniFold Runtime...
+cd /d %~dp0
 where python >nul 2>nul
 set PYTHON_CMD=python
 if %ERRORLEVEL% NEQ 0 (
@@ -39,13 +39,11 @@ if %ERRORLEVEL% NEQ 0 (
     )
 )
 
-echo Installing MiniFold dependencies...
-%PYTHON_CMD% -m pip install -r requirements.txt --quiet
-start "MiniFold-API" cmd /k "cd /d %~dp0MiniFold && %PYTHON_CMD% minifold_api.py"
+echo  - Python runtime detected: %PYTHON_CMD%
+echo  - MiniFold will run in embedded process mode from Spring Boot
 
 :: 3. Java Backend Setup (Maven)
 echo [3/5] Starting FreeWillase Backend (Maven Auto-Sync)...
-echo  - MiniFold API: http://localhost:9001
 timeout /t 3 /nobreak >nul
 start "FreeWillase-Backend" cmd /k "cd /d %~dp0 && mvnw.cmd spring-boot:run"
 
@@ -66,7 +64,7 @@ echo ----------------------------------------------------------
 echo  System initializing, please wait...
 echo  - Frontend: http://localhost:5173
 echo  - Backend API: http://localhost:8081/api
-echo  - MiniFold API: http://localhost:9001
+echo  - MiniFold Runtime: embedded local process
 echo ----------------------------------------------------------
 echo.
 

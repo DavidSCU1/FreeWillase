@@ -46,7 +46,7 @@ const features = [
   },
   {
     title: '智能预测接口',
-    desc: '预留 MiniFold/ESM 等结构预测引擎接口，支持后续算法扩展。',
+    desc: '提供 MiniFold 本地物理推理入口，聚焦序列、环境、链数、加速配置与结构结果返回。',
     icon: Microscope,
     color: 'bg-orange-500/10 text-orange-500'
   }

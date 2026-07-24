@@ -1,58 +1,204 @@
 package com.freewillase.backend.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freewillase.backend.dto.MiniFoldPredictionRequest;
 import com.freewillase.backend.dto.MiniFoldPredictionResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
-import org.springframework.web.client.RestClientResponseException;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class PredictionService {
 
-    private final RestTemplate restTemplate;
-    private final String pythonEngineUrl = "http://localhost:9001/predict";
-    private final String pythonLogsUrl = "http://localhost:9001/logs/";
-    private final String pythonResultUrl = "http://localhost:9001/result/";
+    private final ObjectMapper objectMapper;
 
     public MiniFoldPredictionResponse predictWithMiniFold(MiniFoldPredictionRequest request) {
-        log.info("Requesting MiniFold prediction for sequence length: {}", 
-            request.getSequence() != null ? request.getSequence().length() : 0);
-        log.info("Params: ssn={}, threshold={}, envText={}", request.getSsn(), request.getThreshold(), request.getEnvText());
-        
+        String taskId = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        Path taskDir = getTaskDir(taskId);
+
+        log.info("Submitting embedded MiniFold task {} for sequence length {}", taskId,
+                request.getSequence() != null ? request.getSequence().length() : 0);
+        log.info("Params: targetChains={}, useIgpu={}, backend={}, envText={}",
+                request.getTargetChains(),
+                request.getUseIgpu(),
+                request.getBackend(),
+                request.getEnvText());
+
         try {
-            return restTemplate.postForObject(pythonEngineUrl, request, MiniFoldPredictionResponse.class);
-        } catch (RestClientResponseException e) {
-            log.error("MiniFold API error ({}): {}", e.getRawStatusCode(), e.getResponseBodyAsString());
-            throw new RuntimeException("MiniFold 引擎返回错误: " + e.getResponseBodyAsString());
+            Files.createDirectories(taskDir);
+            Map<String, Object> payload = buildPayload(request);
+            Path payloadPath = taskDir.resolve("request.json");
+            objectMapper.writerWithDefaultPrettyPrinter().writeValue(payloadPath.toFile(), payload);
+
+            List<String> command = new ArrayList<>(resolvePythonCommand());
+            command.add("-u");
+            command.add(getWorkerScript().toString());
+            command.add("--task-dir");
+            command.add(taskDir.toString());
+            command.add("--payload");
+            command.add(payloadPath.toString());
+
+            Path launchLog = taskDir.resolve("launcher.log");
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.directory(getProjectRoot().toFile());
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(launchLog.toFile());
+            builder.environment().put("PYTHONIOENCODING", "utf-8");
+            builder.environment().put("PYTHONUTF8", "1");
+
+            builder.start();
+
+            return MiniFoldPredictionResponse.builder()
+                    .taskId(taskId)
+                    .status("running")
+                    .build();
         } catch (Exception e) {
-            log.error("Failed to connect to MiniFold API at {}: {}", pythonEngineUrl, e.getMessage());
-            throw new RuntimeException("无法连接到 MiniFold 预测引擎 (9001)。详细错误: " + e.getMessage());
+            log.error("Failed to start embedded MiniFold task {}", taskId, e);
+            throw new RuntimeException("无法启动项目内置 MiniFold 进程: " + e.getMessage(), e);
         }
     }
 
     public String getMiniFoldLogs(String taskId) {
         try {
-            return restTemplate.getForObject(pythonLogsUrl + taskId, String.class);
+            Path taskDir = getTaskDir(taskId);
+            if (!Files.exists(taskDir)) {
+                return "任务不存在: " + taskId;
+            }
+
+            Path processLog = taskDir.resolve("process.log");
+            if (Files.exists(processLog)) {
+                return Files.readString(processLog, StandardCharsets.UTF_8);
+            }
+
+            Path launcherLog = taskDir.resolve("launcher.log");
+            if (Files.exists(launcherLog)) {
+                return Files.readString(launcherLog, StandardCharsets.UTF_8);
+            }
+
+            return "";
         } catch (Exception e) {
-            log.error("Failed to fetch logs for task {}: {}", taskId, e.getMessage());
+            log.error("Failed to fetch logs for task {}", taskId, e);
             return "无法获取日志: " + e.getMessage();
         }
     }
 
     public MiniFoldPredictionResponse getMiniFoldResult(String taskId) {
         try {
-            return restTemplate.getForObject(pythonResultUrl + taskId, MiniFoldPredictionResponse.class);
+            Path taskDir = getTaskDir(taskId);
+            if (!Files.exists(taskDir)) {
+                return MiniFoldPredictionResponse.builder()
+                        .status("failed")
+                        .error("任务不存在: " + taskId)
+                        .build();
+            }
+
+            Path resultPath = taskDir.resolve("result.json");
+            if (!Files.exists(resultPath)) {
+                return MiniFoldPredictionResponse.builder()
+                        .taskId(taskId)
+                        .status("running")
+                        .build();
+            }
+
+            MiniFoldPredictionResponse response = objectMapper.readValue(resultPath.toFile(), MiniFoldPredictionResponse.class);
+            if (response.getTaskId() == null || response.getTaskId().isBlank()) {
+                response.setTaskId(taskId);
+            }
+            return response;
         } catch (Exception e) {
-            log.error("Failed to fetch result for task {}: {}", taskId, e.getMessage());
+            log.error("Failed to fetch result for task {}", taskId, e);
             return MiniFoldPredictionResponse.builder()
+                    .taskId(taskId)
                     .status("failed")
                     .error("获取结果失败: " + e.getMessage())
                     .build();
         }
+    }
+
+    private Map<String, Object> buildPayload(MiniFoldPredictionRequest request) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sequence", request.getSequence());
+        payload.put("envText", defaultString(request.getEnvText()));
+        payload.put("targetChains", request.getTargetChains());
+        payload.put("useIgpu", Boolean.TRUE.equals(request.getUseIgpu()));
+        payload.put("backend", request.getBackend() != null && !request.getBackend().isBlank()
+                ? request.getBackend()
+                : (Boolean.TRUE.equals(request.getUseIgpu()) ? "auto" : "cpu"));
+        return payload;
+    }
+
+    private List<String> resolvePythonCommand() {
+        String configured = System.getenv("MINIFOLD_PYTHON");
+        if (configured != null && !configured.isBlank()) {
+            return List.of(configured.trim());
+        }
+
+        List<List<String>> candidates = List.of(
+                List.of("python"),
+                List.of("python3"),
+                List.of("py", "-3")
+        );
+
+        for (List<String> candidate : candidates) {
+            if (isPythonAvailable(candidate)) {
+                return candidate;
+            }
+        }
+
+        throw new IllegalStateException("未找到可用的 Python 解释器，请安装 Python 或设置环境变量 MINIFOLD_PYTHON");
+    }
+
+    private boolean isPythonAvailable(List<String> command) {
+        List<String> probe = new ArrayList<>(command);
+        probe.add("--version");
+        try {
+            Process process = new ProcessBuilder(probe)
+                    .redirectErrorStream(true)
+                    .start();
+            int exitCode = process.waitFor();
+            return exitCode == 0;
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    private Path getProjectRoot() {
+        return Paths.get("").toAbsolutePath().normalize();
+    }
+
+    private Path getRuntimeRoot() {
+        return getProjectRoot().resolve("minifold_runtime");
+    }
+
+    private Path getWorkerScript() {
+        Path worker = getRuntimeRoot().resolve("worker.py");
+        if (!Files.exists(worker)) {
+            throw new IllegalStateException("未找到内置 MiniFold worker: " + worker);
+        }
+        return worker;
+    }
+
+    private Path getTaskDir(String taskId) {
+        return getRuntimeRoot().resolve("tasks").resolve(taskId);
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
     }
 }

@@ -377,6 +377,7 @@ export const usePredictionStore = defineStore('prediction', () => {
     submit,
     selectTask,
     fetchTaskLogs,
+    fetchTaskResult,
     clearApiKey,
   }
 })

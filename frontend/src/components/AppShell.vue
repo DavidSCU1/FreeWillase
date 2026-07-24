@@ -25,7 +25,9 @@ const navItems = [
   { label: '预测接口', to: '/prediction', icon: Microscope },
 ]
 
-const currentItem = computed(() => navItems.find((item) => item.to === route.path) || navItems[0])
+const isRouteActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
+
+const currentItem = computed(() => navItems.find((item) => isRouteActive(item.to)) || navItems[0])
 </script>
 
 <template>
@@ -59,7 +61,7 @@ const currentItem = computed(() => navItems.find((item) => item.to === route.pat
           :key="item.to"
           :to="item.to"
           class="flex items-center justify-between px-3 py-2.5 rounded-apple transition-all group"
-          :class="route.path === item.to 
+          :class="isRouteActive(item.to)
             ? 'bg-apple-blue text-white shadow-lg shadow-apple-blue/20' 
             : 'text-apple-secondary-text hover:bg-black/5 dark:hover:bg-white/5 hover:text-apple-text'"
         >
@@ -67,7 +69,7 @@ const currentItem = computed(() => navItems.find((item) => item.to === route.pat
             <component :is="item.icon" :size="18" />
             <span class="text-sm font-medium">{{ item.label }}</span>
           </div>
-          <ChevronRight v-if="route.path === item.to" :size="14" class="opacity-50" />
+          <ChevronRight v-if="isRouteActive(item.to)" :size="14" class="opacity-50" />
         </RouterLink>
       </nav>
 

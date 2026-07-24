@@ -15,6 +15,11 @@ frontend/dist-ssr/
 frontend/.vite/
 
 # --- Python Engine ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
 python_engine/__pycache__/
 python_engine/*.pyc
 python_engine/.venv/
@@ -34,6 +39,8 @@ Thumbs.db
 .env
 src/main/resources/application-local.properties
 python_engine/.env
+minifold_runtime/.env
+minifold_runtime/.env.*
 
 # --- Docker ---
 .docker/

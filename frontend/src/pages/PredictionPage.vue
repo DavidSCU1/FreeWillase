@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch, onUnmounted, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { 
   Settings, 
   Play, 
@@ -15,16 +16,15 @@ import {
   Terminal,
   Trash2
 } from 'lucide-vue-next'
-import { predictionModules } from '@/data/mock'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { usePredictionStore } from '@/stores/prediction'
 
+const router = useRouter()
 const store = usePredictionStore()
 const consoleOutput = ref<HTMLElement | null>(null)
 let logInterval: any = null
 
 const engines = [
-  { id: 'minifold', label: 'MiniFold-v1' },
   { id: 'biohub', label: 'Biohub' },
   { id: 'nvidia', label: 'NVIDIA ESMFold' },
   { id: 'chai1', label: 'Chai-1' },
@@ -53,7 +53,7 @@ const defaultBaseUrlHint = computed(() => {
 const canSubmit = computed(() => !store.isSubmitting)
 const nvidiaSingleOnly = computed(() => store.provider === 'nvidia')
 const rnafoldSingleOnly = computed(() => store.provider === 'rnafold')
-const requiresApiKey = computed(() => store.provider !== 'minifold' && store.provider !== 'rnafold')
+const requiresApiKey = computed(() => store.provider !== 'rnafold')
 const rnafoldLockedType = computed(() => store.provider === 'rnafold')
 
 const inputFormatTitle = computed(() => {
@@ -178,6 +178,12 @@ watch(() => store.activeTask?.id, (newId) => {
 onUnmounted(() => {
   stopPollingLogs()
 })
+
+onMounted(() => {
+  if (store.provider === 'minifold') {
+    store.provider = 'biohub'
+  }
+})
 </script>
 
 <template>
@@ -186,7 +192,7 @@ onUnmounted(() => {
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div class="space-y-1">
         <h1 class="text-3xl font-bold tracking-tight text-apple-text">预测接口中心</h1>
-        <p class="text-apple-secondary-text text-sm">MiniFold / ESM 结构预测引擎与参数配置</p>
+        <p class="text-apple-secondary-text text-sm">云端结构预测引擎与参数配置</p>
       </div>
       <div class="flex items-center gap-3">
         <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-apple-blue/10 text-apple-blue text-[10px] font-bold uppercase tracking-widest">
@@ -256,13 +262,36 @@ onUnmounted(() => {
             <h3 class="text-sm font-bold text-apple-text">预测说明</h3>
           </div>
           <p class="text-xs text-apple-secondary-text leading-relaxed">
-            本板块集成了多种结构预测引擎。MiniFold 采用本地异步引擎，支持实时日志监控与 AI 投票辅助；Biohub/NVIDIA/Chai-1 则通过 API 进行同步调用。
+            本板块保留 Biohub、NVIDIA ESMFold、Chai-1 与 RNAfold 的云端调用能力。MiniFold 已拆分到独立工作台，以便承载本地物理推理流程。
           </p>
         </div>
       </div>
 
       <!-- Left Column: Setup & Results -->
       <div class="lg:col-span-2 lg:col-start-1 lg:row-start-1 space-y-8">
+        <div class="apple-card p-6 bg-gradient-to-br from-apple-blue/5 via-transparent to-purple-500/5 border-apple-blue/10">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div class="space-y-2">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
+                  <Sparkles :size="16" />
+                </div>
+                <h3 class="text-sm font-bold text-apple-text">MiniFold 已迁移为独立工作台</h3>
+              </div>
+              <p class="text-xs text-apple-secondary-text leading-relaxed">
+                本地物理推理、链条控制、显卡后端和实时结果现在都放在专属页面处理，这里只保留进入入口。
+              </p>
+            </div>
+            <button
+              type="button"
+              class="apple-button-primary px-6 py-2.5 flex items-center gap-2 self-start md:self-center"
+              @click="router.push('/prediction/minifold')"
+            >
+              <ChevronRight :size="16" />
+              <span>进入 MiniFold 工作台</span>
+            </button>
+          </div>
+        </div>
         
         <!-- Setup Card -->
         <div class="apple-card p-6">
@@ -510,12 +539,14 @@ onUnmounted(() => {
               <!-- Structure Viewer (3/4 width) -->
               <div class="md:col-span-3 bg-black/5 dark:bg-white/5 relative border-r border-apple-border">
                 <StructureViewer 
-                  v-if="store.viewerUrl || store.viewerFormat === 'dot-bracket'"
-                  :structure-url="store.viewerUrl" 
-                  :format="store.viewerFormat"
-                  :data="store.lastStructureText"
+                  v-if="store.viewerUrl"
+                  :url="store.viewerUrl"
+                  :format="store.viewerFormat === 'mmcif' ? 'mmcif' : 'pdb'"
                   class="w-full h-full"
                 />
+                <div v-else-if="store.viewerFormat === 'dot-bracket' && store.lastStructureText" class="h-full p-6 overflow-auto bg-apple-background/30">
+                  <pre class="text-xs font-mono text-apple-text whitespace-pre-wrap">{{ store.lastStructureText }}</pre>
+                </div>
                 <div v-else class="flex flex-col items-center justify-center h-full text-apple-secondary-text gap-4">
                   <Loader2 class="animate-spin text-apple-blue" :size="32" />
                   <p class="text-xs font-medium">正在初始化查看器...</p>
