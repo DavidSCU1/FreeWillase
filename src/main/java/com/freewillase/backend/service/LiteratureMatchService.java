@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Slf4j
@@ -39,8 +40,10 @@ public class LiteratureMatchService {
 
         log.info("Processing enzyme {}: {} ({})", enzymeId, enzyme.getProteinAccession(), enzyme.getName());
 
-        // 1. Clear old relations for this enzyme
-        relationMapper.delete(new LambdaQueryWrapper<LiteratureRelation>().eq(LiteratureRelation::getEnzymeId, enzymeId));
+        // 1. Clear old candidate relations for this enzyme while keeping downloaded records.
+        relationMapper.delete(new LambdaQueryWrapper<LiteratureRelation>()
+                .eq(LiteratureRelation::getEnzymeId, enzymeId)
+                .eq(LiteratureRelation::getSavedToLibrary, false));
         
         String accession = enzyme.getProteinAccession();
         String name = enzyme.getName();
@@ -79,7 +82,12 @@ public class LiteratureMatchService {
 
     @org.springframework.scheduling.annotation.Async
     public void matchLiteratureForAll(String email, String apiKey) {
-        List<EnzymeEntry> enzymes = enzymeMapper.selectList(null);
+        matchLiteratureForEnzymes(null, email, apiKey);
+    }
+
+    @org.springframework.scheduling.annotation.Async
+    public void matchLiteratureForEnzymes(List<Long> enzymeIds, String email, String apiKey) {
+        List<EnzymeEntry> enzymes = loadTargetEnzymes(enzymeIds);
         log.info("Starting bulk literature match for {} enzymes. Email: {}, API Key: {}", 
             enzymes.size(), email, (apiKey != null ? "***" : "none"));
         
@@ -113,6 +121,7 @@ public class LiteratureMatchService {
                 .doi(pubMed.getDoi())
                 .abstractText("PubMed metadata matching...")
                 .sourceDb("PubMed")
+                .sourceUrl(buildPubMedUrl(pubMed.getPmid()))
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -123,7 +132,18 @@ public class LiteratureMatchService {
             literatureMapper.insert(lit);
         } else {
             lit = existing;
-            // Update if needed (optional)
+            boolean shouldUpdate = false;
+            if ((lit.getSourceUrl() == null || lit.getSourceUrl().isBlank()) && pubMed.getPmid() != null) {
+                lit.setSourceUrl(buildPubMedUrl(pubMed.getPmid()));
+                shouldUpdate = true;
+            }
+            if ((lit.getDoi() == null || lit.getDoi().isBlank()) && pubMed.getDoi() != null && !pubMed.getDoi().isBlank()) {
+                lit.setDoi(pubMed.getDoi());
+                shouldUpdate = true;
+            }
+            if (shouldUpdate) {
+                literatureMapper.updateById(lit);
+            }
         }
 
         // Create relation if not exists
@@ -151,16 +171,17 @@ public class LiteratureMatchService {
                     .confidenceScore(new BigDecimal(score))
                     .matchedFields(String.join(", ", matches))
                     .createdAt(LocalDateTime.now())
+                    .savedToLibrary(false)
                     .build();
             relationMapper.insert(relation);
         } else {
-            // Update existing relation score if new one is higher
+            existingRelation.setRelationType(relationType);
+            existingRelation.setConfidenceLevel(confidence);
+            existingRelation.setMatchedFields(String.join(", ", matches));
             if (new BigDecimal(score).compareTo(existingRelation.getConfidenceScore()) > 0) {
                 existingRelation.setConfidenceScore(new BigDecimal(score));
-                existingRelation.setConfidenceLevel(confidence);
-                existingRelation.setMatchedFields(String.join(", ", matches));
-                relationMapper.updateById(existingRelation);
             }
+            relationMapper.updateById(existingRelation);
         }
     }
 
@@ -205,49 +226,86 @@ public class LiteratureMatchService {
 
     public List<LiteratureRecord> getLiteratureForEnzyme(Long enzymeId) {
         List<LiteratureRelation> relations = relationMapper.selectList(new LambdaQueryWrapper<LiteratureRelation>()
-                .eq(LiteratureRelation::getEnzymeId, enzymeId));
-        
-        List<Long> litIds = relations.stream().map(LiteratureRelation::getLiteratureId).collect(java.util.stream.Collectors.toList());
-        
-        if (litIds.isEmpty()) return List.of();
-        
-        return literatureMapper.selectBatchIds(litIds);
+                .eq(LiteratureRelation::getEnzymeId, enzymeId)
+                .eq(LiteratureRelation::getSavedToLibrary, true)
+                .orderByDesc(LiteratureRelation::getConfidenceScore));
+
+        if (relations.isEmpty()) return List.of();
+
+        return buildDisplayRecords(relations);
+    }
+
+    @Transactional
+    public void downloadLiterature(Long relationId) {
+        LiteratureRelation relation = relationMapper.selectById(relationId);
+        if (relation == null) {
+            throw new IllegalArgumentException("未找到对应的文献匹配记录");
+        }
+        if (Boolean.TRUE.equals(relation.getSavedToLibrary())) {
+            return;
+        }
+        relation.setSavedToLibrary(true);
+        relationMapper.updateById(relation);
     }
 
     public List<LiteratureRecord> listAll() {
-        // Return a flattened list of "Matching Evidences" (one per relation)
         List<LiteratureRelation> relations = relationMapper.selectList(new LambdaQueryWrapper<LiteratureRelation>()
+                .orderByDesc(LiteratureRelation::getSavedToLibrary)
                 .orderByDesc(LiteratureRelation::getConfidenceScore));
-        
+        return buildDisplayRecords(relations);
+    }
+
+    private List<EnzymeEntry> loadTargetEnzymes(List<Long> enzymeIds) {
+        if (enzymeIds == null || enzymeIds.isEmpty()) {
+            return enzymeMapper.selectList(null);
+        }
+        List<EnzymeEntry> enzymes = enzymeMapper.selectBatchIds(enzymeIds);
+        return enzymes != null ? enzymes : Collections.emptyList();
+    }
+
+    private List<LiteratureRecord> buildDisplayRecords(List<LiteratureRelation> relations) {
         List<LiteratureRecord> result = new ArrayList<>();
         for (LiteratureRelation rel : relations) {
             LiteratureRecord record = literatureMapper.selectById(rel.getLiteratureId());
-            if (record != null) {
-                // Clone or create a copy to avoid shared state if the same record matches multiple enzymes
-                LiteratureRecord displayRecord = LiteratureRecord.builder()
-                        .id(record.getId())
-                        .title(record.getTitle())
-                        .authors(record.getAuthors())
-                        .journal(record.getJournal())
-                        .publishYear(record.getPublishYear())
-                        .doi(record.getDoi())
-                        .pmid(record.getPmid())
-                        .abstractText(record.getAbstractText())
-                        .sourceDb(record.getSourceDb())
-                        .createdAt(record.getCreatedAt())
-                        .confidenceScore(rel.getConfidenceScore())
-                        .confidenceLevel(rel.getConfidenceLevel())
-                        .matchedFields(rel.getMatchedFields())
-                        .build();
-
-                EnzymeEntry enzyme = enzymeMapper.selectById(rel.getEnzymeId());
-                if (enzyme != null) {
-                    displayRecord.setMatchedEnzymeName(enzyme.getName());
-                    displayRecord.setMatchedEnzymeAccession(enzyme.getProteinAccession());
-                }
-                result.add(displayRecord);
+            if (record == null) {
+                continue;
             }
+
+            LiteratureRecord displayRecord = LiteratureRecord.builder()
+                    .id(record.getId())
+                    .title(record.getTitle())
+                    .authors(record.getAuthors())
+                    .journal(record.getJournal())
+                    .publishYear(record.getPublishYear())
+                    .doi(record.getDoi())
+                    .pmid(record.getPmid())
+                    .keywords(record.getKeywords())
+                    .abstractText(record.getAbstractText())
+                    .sourceDb(record.getSourceDb())
+                    .sourceUrl(record.getSourceUrl())
+                    .createdAt(record.getCreatedAt())
+                    .confidenceScore(rel.getConfidenceScore())
+                    .confidenceLevel(rel.getConfidenceLevel())
+                    .relationId(rel.getId())
+                    .enzymeId(rel.getEnzymeId())
+                    .matchedFields(rel.getMatchedFields())
+                    .savedToLibrary(Boolean.TRUE.equals(rel.getSavedToLibrary()))
+                    .build();
+
+            EnzymeEntry enzyme = enzymeMapper.selectById(rel.getEnzymeId());
+            if (enzyme != null) {
+                displayRecord.setMatchedEnzymeName(enzyme.getName());
+                displayRecord.setMatchedEnzymeAccession(enzyme.getProteinAccession());
+            }
+            result.add(displayRecord);
         }
         return result;
+    }
+
+    private String buildPubMedUrl(String pmid) {
+        if (pmid == null || pmid.isBlank()) {
+            return null;
+        }
+        return "https://pubmed.ncbi.nlm.nih.gov/" + pmid + "/";
     }
 }

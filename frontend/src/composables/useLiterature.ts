@@ -1,35 +1,22 @@
-import { ref } from 'vue'
-import { listAllLiteratures, matchLiterature, matchAllLiteratures, getEnzymeLiteratures } from '@/utils/api'
-
-export interface LiteratureRecord {
-  id: number
-  title: string
-  authors: string
-  journal: string
-  publishYear: number
-  doi: string
-  pmid: string
-  abstractText: string
-  sourceDb: string
-  createdAt: string
-  confidenceScore?: number
-  confidenceLevel?: string
-  matchedEnzymeName?: string
-  matchedEnzymeAccession?: string
-  matchedFields?: string
-}
+import { computed, ref } from 'vue'
+import { downloadLiteratureRelation, getEnzymeLiteratures, listAllLiteratures, scanLiteratures } from '@/utils/api'
+import type { LiteratureRecord } from '@/types'
 
 export function useLiterature() {
   const literatures = ref<LiteratureRecord[]>([])
   const enzymeLiteratures = ref<LiteratureRecord[]>([])
-  const loading = ref(false)
+  const listLoading = ref(false)
+  const enzymeLoading = ref(false)
+  const scanLoading = ref(false)
+  const downloadingRelationIds = ref<number[]>([])
   const error = ref<string | null>(null)
 
   const ncbiEmail = ref(localStorage.getItem('ncbi_email') || '')
   const ncbiApiKey = ref(localStorage.getItem('ncbi_api_key') || '')
+  const loading = computed(() => listLoading.value || scanLoading.value)
 
   const fetchAllLiteratures = async () => {
-    loading.value = true
+    listLoading.value = true
     error.value = null
     try {
       literatures.value = await listAllLiteratures()
@@ -37,55 +24,53 @@ export function useLiterature() {
       error.value = '无法获取文献记录'
       console.error(err)
     } finally {
-      loading.value = false
+      listLoading.value = false
     }
   }
 
   const fetchEnzymeLiteratures = async (enzymeId: number) => {
-    loading.value = true
+    enzymeLoading.value = true
     try {
       enzymeLiteratures.value = await getEnzymeLiteratures(enzymeId)
     } catch (err) {
       console.error('获取酶关联文献失败', err)
       enzymeLiteratures.value = []
     } finally {
-      loading.value = false
+      enzymeLoading.value = false
     }
   }
 
-  const matchForEnzyme = async (enzymeId: number) => {
-    // Save credentials to localStorage
+  const scan = async (enzymeIds?: number[]) => {
+    scanLoading.value = true
     localStorage.setItem('ncbi_email', ncbiEmail.value)
     localStorage.setItem('ncbi_api_key', ncbiApiKey.value)
 
     try {
-      await matchLiterature(enzymeId, {
+      await scanLiteratures({
         ncbiEmail: ncbiEmail.value.trim() || undefined,
         ncbiApiKey: ncbiApiKey.value.trim() || undefined,
+        enzymeIds: enzymeIds?.length ? enzymeIds : undefined,
       })
-      await fetchAllLiteratures()
     } catch (err) {
       console.error('匹配失败', err)
+      throw err
+    } finally {
+      scanLoading.value = false
     }
   }
 
-  const matchAll = async () => {
-    loading.value = true
-    localStorage.setItem('ncbi_email', ncbiEmail.value)
-    localStorage.setItem('ncbi_api_key', ncbiApiKey.value)
-
+  const downloadLiterature = async (relationId: number) => {
     try {
-      await matchAllLiteratures({
-        ncbiEmail: ncbiEmail.value.trim() || undefined,
-        ncbiApiKey: ncbiApiKey.value.trim() || undefined,
-      })
-      // Since it's async, we might want to poll or just refresh after a while
-      // For now, let's just refresh once
-      setTimeout(fetchAllLiteratures, 3000)
+      downloadingRelationIds.value = [...downloadingRelationIds.value, relationId]
+      await downloadLiteratureRelation(relationId)
+      literatures.value = literatures.value.map((item) =>
+        item.relationId === relationId ? { ...item, savedToLibrary: true } : item,
+      )
     } catch (err) {
-      console.error('全库匹配启动失败', err)
+      console.error('文献下载失败', err)
+      throw err
     } finally {
-      loading.value = false
+      downloadingRelationIds.value = downloadingRelationIds.value.filter((id) => id !== relationId)
     }
   }
 
@@ -93,12 +78,16 @@ export function useLiterature() {
     literatures,
     enzymeLiteratures,
     loading,
+    listLoading,
+    enzymeLoading,
+    scanLoading,
+    downloadingRelationIds,
     error,
     ncbiEmail,
     ncbiApiKey,
     fetchAllLiteratures,
     fetchEnzymeLiteratures,
-    matchForEnzyme,
-    matchAll
+    scan,
+    downloadLiterature,
   }
 }

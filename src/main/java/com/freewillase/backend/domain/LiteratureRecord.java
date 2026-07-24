@@ -35,9 +35,15 @@ public class LiteratureRecord {
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private String confidenceLevel;
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Long relationId;
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Long enzymeId;
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private String matchedEnzymeName;
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private String matchedEnzymeAccession;
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)
     private String matchedFields;
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private Boolean savedToLibrary;
 }

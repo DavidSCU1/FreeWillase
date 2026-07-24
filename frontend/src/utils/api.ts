@@ -1,4 +1,4 @@
-import type { EnzymeEntry, ImportTask } from '@/types'
+import type { EnzymeEntry, ImportTask, LiteratureRecord } from '@/types'
 
 interface ImportRequest {
   taskName: string
@@ -10,6 +10,7 @@ interface ImportRequest {
 interface MatchRequest {
   ncbiEmail?: string
   ncbiApiKey?: string
+  enzymeIds?: number[]
 }
 
 interface RnaFoldRequest {
@@ -108,17 +109,30 @@ export function matchLiterature(enzymeId: number, payload: MatchRequest) {
 }
 
 export function getEnzymeLiteratures(enzymeId: number) {
-  return request<any[]>(`/api/enzymes/${enzymeId}/literatures`)
+  return request<LiteratureRecord[]>(`/api/enzymes/${enzymeId}/literatures`)
 }
 
 export function listAllLiteratures() {
-  return request<any[]>('/api/literatures')
+  return request<LiteratureRecord[]>('/api/literatures')
+}
+
+export function scanLiteratures(payload: MatchRequest) {
+  return request<void>('/api/literatures/scan', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function matchAllLiteratures(data: { ncbiEmail?: string, ncbiApiKey?: string }) {
   return request<void>('/api/literatures/match-all', {
     method: 'POST',
-    body: JSON.stringify(data)
+    body: JSON.stringify(data),
+  })
+}
+
+export function downloadLiteratureRelation(relationId: number) {
+  return request<void>(`/api/literatures/relations/${relationId}/download`, {
+    method: 'POST',
   })
 }
 

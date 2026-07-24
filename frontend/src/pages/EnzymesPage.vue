@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { 
   Search, 
   Filter, 
@@ -21,8 +22,9 @@ import { useNcbiImport } from '@/composables/useNcbiImport'
 import { useLiterature } from '@/composables/useLiterature'
 import StructureViewer from '@/components/StructureViewer.vue'
 
+const router = useRouter()
 const { enzymes, refreshEnzymeLibrary, removeEnzyme } = useNcbiImport()
-const { enzymeLiteratures, fetchEnzymeLiteratures, loading: loadingLit, matchForEnzyme, ncbiEmail, ncbiApiKey } = useLiterature()
+const { enzymeLiteratures, fetchEnzymeLiteratures, enzymeLoading: loadingLit } = useLiterature()
 
 const selectedId = ref<number | null>(null)
 const searchQuery = ref('')
@@ -40,10 +42,15 @@ async function handleDelete(id: number) {
   }
 }
 
-async function handleAutoMatch() {
-  if (!selectedId.value) return
-  await matchForEnzyme(selectedId.value)
-  await fetchEnzymeLiteratures(selectedId.value)
+function handleOpenMatcher() {
+  if (!selectedId.value) {
+    router.push('/matcher')
+    return
+  }
+  router.push({
+    path: '/matcher',
+    query: { enzymeId: String(selectedId.value) },
+  })
 }
 
 const filteredEnzymes = computed(() => {
@@ -417,13 +424,13 @@ onMounted(async () => {
                 <h3 class="text-sm font-bold text-apple-text">关联文献</h3>
               </div>
               <button 
-                @click="handleAutoMatch"
+                @click="handleOpenMatcher"
                 :disabled="loadingLit"
                 class="text-[10px] font-bold text-apple-blue hover:underline disabled:opacity-50 flex items-center gap-1"
               >
                 <Loader2 v-if="loadingLit" :size="10" class="animate-spin" />
                 <Sparkles v-else :size="10" />
-                自动匹配
+                去文献匹配页
               </button>
             </div>
             
@@ -437,7 +444,7 @@ onMounted(async () => {
                 <div 
                   v-for="lit in enzymeLiteratures" 
                   :key="lit.id"
-                  class="p-4 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 group cursor-pointer hover:border-apple-green/30 transition-all"
+                  class="p-4 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 group hover:border-apple-green/30 transition-all"
                 >
                   <div class="flex justify-between items-start mb-2">
                     <span 
@@ -446,17 +453,31 @@ onMounted(async () => {
                     >
                       {{ lit.confidenceLevel || 'MATCH' }}
                     </span>
-                    <span class="text-[9px] text-apple-secondary-text font-bold uppercase">PMID: {{ lit.pmid }}</span>
+                    <a
+                      :href="lit.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${lit.pmid}/`"
+                      target="_blank"
+                      rel="noreferrer"
+                      class="text-[9px] text-apple-secondary-text font-bold uppercase hover:text-apple-blue"
+                    >
+                      PMID: {{ lit.pmid }}
+                    </a>
                   </div>
-                  <h4 class="text-xs font-bold text-apple-text line-clamp-2 leading-snug group-hover:text-apple-blue transition-colors">
-                    {{ lit.title }}
-                  </h4>
+                  <a
+                    :href="lit.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${lit.pmid}/`"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="block"
+                  >
+                    <h4 class="text-xs font-bold text-apple-text line-clamp-2 leading-snug group-hover:text-apple-blue transition-colors">
+                      {{ lit.title }}
+                    </h4>
+                  </a>
                   <p class="mt-2 text-[10px] text-apple-secondary-text italic">{{ lit.journal }}, {{ lit.publishYear }}</p>
                 </div>
               </template>
 
               <div v-else class="p-8 text-center border-2 border-dashed border-apple-border rounded-apple">
-                <p class="text-xs text-apple-secondary-text italic">尚无证据记录。点击“自动匹配”捕捉文献。</p>
+                <p class="text-xs text-apple-secondary-text italic">尚无已下载文献。请前往“文献匹配”扫描并下载后，再回到这里查看。</p>
               </div>
             </div>
           </div>

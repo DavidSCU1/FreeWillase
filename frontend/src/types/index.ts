@@ -39,6 +39,28 @@ export interface EnzymeEntry {
   createdAt: string
 }
 
+export interface LiteratureRecord {
+  id: number
+  relationId?: number
+  enzymeId?: number
+  title: string
+  authors: string
+  journal: string
+  publishYear: number
+  doi?: string
+  pmid: string
+  abstractText?: string
+  sourceDb?: string
+  sourceUrl?: string
+  createdAt: string
+  confidenceScore?: number
+  confidenceLevel?: string
+  matchedEnzymeName?: string
+  matchedEnzymeAccession?: string
+  matchedFields?: string
+  savedToLibrary?: boolean
+}
+
 export type PredictionProvider = 'biohub' | 'nvidia' | 'chai1' | 'rnafold' | 'minifold'
 
 export type MoleculeType = 'protein' | 'RNA' | 'DNA' | 'ligand'
