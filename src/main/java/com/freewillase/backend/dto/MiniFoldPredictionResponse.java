@@ -12,7 +12,10 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MiniFoldPredictionResponse {
+    private String taskId;
+    private String status;
     private String pdb;
     private String analysis;
     private List<String> chains;
+    private String error;
 }

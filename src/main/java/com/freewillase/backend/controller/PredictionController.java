@@ -4,10 +4,7 @@ import com.freewillase.backend.dto.MiniFoldPredictionRequest;
 import com.freewillase.backend.dto.MiniFoldPredictionResponse;
 import com.freewillase.backend.service.PredictionService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/prediction")
@@ -25,5 +22,15 @@ public class PredictionController {
             throw new IllegalArgumentException("火山 API Key 不能为空");
         }
         return predictionService.predictWithMiniFold(request);
+    }
+
+    @GetMapping("/minifold/logs/{taskId}")
+    public String getLogs(@PathVariable String taskId) {
+        return predictionService.getMiniFoldLogs(taskId);
+    }
+
+    @GetMapping("/minifold/result/{taskId}")
+    public MiniFoldPredictionResponse getResult(@PathVariable String taskId) {
+        return predictionService.getMiniFoldResult(taskId);
     }
 }

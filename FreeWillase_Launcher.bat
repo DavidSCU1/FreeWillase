@@ -23,9 +23,9 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
-:: 2. Python Environment & Dependencies
-echo [2/5] Setting up Python Engine Environment...
-cd /d %~dp0python_engine
+:: 2. MiniFold API Setup
+echo [2/5] Setting up MiniFold API Environment...
+cd /d %~dp0MiniFold
 where python >nul 2>nul
 set PYTHON_CMD=python
 if %ERRORLEVEL% NEQ 0 (
@@ -39,12 +39,13 @@ if %ERRORLEVEL% NEQ 0 (
     )
 )
 
-echo Installing Python dependencies...
+echo Installing MiniFold dependencies...
 %PYTHON_CMD% -m pip install -r requirements.txt --quiet
-start "MiniFold-Engine" cmd /k "cd /d %~dp0python_engine && %PYTHON_CMD% server.py"
+start "MiniFold-API" cmd /k "cd /d %~dp0MiniFold && %PYTHON_CMD% minifold_api.py"
 
 :: 3. Java Backend Setup (Maven)
 echo [3/5] Starting FreeWillase Backend (Maven Auto-Sync)...
+echo  - MiniFold API: http://localhost:9001
 timeout /t 3 /nobreak >nul
 start "FreeWillase-Backend" cmd /k "cd /d %~dp0 && mvnw.cmd spring-boot:run"
 
@@ -65,7 +66,7 @@ echo ----------------------------------------------------------
 echo  System initializing, please wait...
 echo  - Frontend: http://localhost:5173
 echo  - Backend API: http://localhost:8081/api
-echo  - Prediction Engine: http://localhost:8001
+echo  - MiniFold API: http://localhost:9001
 echo ----------------------------------------------------------
 echo.
 

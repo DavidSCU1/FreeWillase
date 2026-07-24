@@ -57,6 +57,9 @@ export interface PredictionRequest {
   sequence?: string
   sequenceRecords?: Array<{ name: string; sequence: string }>
   smiles?: string
+  envText?: string
+  ssn?: number
+  threshold?: number
 }
 
 export interface PredictionResult {
@@ -75,10 +78,13 @@ export interface PredictionResult {
   ensembleDiversity?: number
   centroidStructure?: string
   centroidEnergy?: number
+  analysis?: string
+  taskId?: string
 }
 
 export interface PredictionTask {
   id: string
+  engineTaskId?: string
   createdAt: string
   status: 'running' | 'success' | 'error'
   provider: PredictionProvider

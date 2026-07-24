@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { MoleculeType, PredictionProvider, PredictionTask } from '@/types'
 import { getSupportedModels, getSupportedMoleculeTypes, normalizeSequenceInput, parseSequenceRecords, predictStructure } from '@/utils/predictionProviders'
+import { getMiniFoldLogs, getMiniFoldResult } from '@/utils/api'
 
 type StoredSettings = {
   provider: PredictionProvider
@@ -12,6 +13,7 @@ type StoredSettings = {
   submitMode?: 'single' | 'batch' | 'complex'
   rememberApiKey?: boolean
   apiKey?: string
+  tasks?: PredictionTask[]
 }
 
 const STORAGE_KEY = 'predictionSettings'
@@ -40,12 +42,18 @@ export const usePredictionStore = defineStore('prediction', () => {
   const submitMode = ref<'single' | 'batch' | 'complex'>('single')
   const sequence = ref('')
   const smiles = ref('')
+  const envText = ref('')
+  const taskLogs = ref<Record<string, string>>({})
 
   const tasks = ref<PredictionTask[]>([])
   const activeTaskId = ref<string | null>(null)
 
   const isSubmitting = ref(false)
   const error = ref<string | null>(null)
+  
+  // MiniFold Specific Parameters
+  const minifoldSsn = ref(5)
+  const minifoldThreshold = ref(0.5)
 
   const viewerUrl = ref<string | null>(null)
   const viewerFormat = ref<'pdb' | 'mmcif' | 'dot-bracket'>('pdb')
@@ -69,6 +77,7 @@ export const usePredictionStore = defineStore('prediction', () => {
     }
     rememberApiKey.value = !!saved.rememberApiKey
     if (rememberApiKey.value && typeof saved.apiKey === 'string') apiKey.value = saved.apiKey
+    if (Array.isArray(saved.tasks)) tasks.value = saved.tasks
   }
 
   function persistSettings() {
@@ -81,6 +90,7 @@ export const usePredictionStore = defineStore('prediction', () => {
       submitMode: submitMode.value,
       rememberApiKey: rememberApiKey.value,
       apiKey: rememberApiKey.value ? apiKey.value : undefined,
+      tasks: tasks.value.slice(0, 20), // Persist last 20 tasks
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   }
@@ -136,11 +146,7 @@ export const usePredictionStore = defineStore('prediction', () => {
 
   async function submit() {
     error.value = null
-    if (provider.value === 'minifold') {
-      error.value = 'MiniFold 已预留接口，你无需操作'
-      return
-    }
-
+    
     if (submitMode.value !== 'single' && moleculeType.value === 'ligand') {
       error.value = 'Ligand 当前仅支持单条提交'
       return
@@ -241,8 +247,18 @@ export const usePredictionStore = defineStore('prediction', () => {
               sequence: (moleculeType.value === 'ligand' || submitMode.value === 'complex') ? undefined : entry.record.sequence,
               sequenceRecords: submitMode.value === 'complex' ? complexRecords : undefined,
               smiles: smiles.value,
+              envText: envText.value,
+              // MiniFold specific
+              ssn: provider.value === 'minifold' ? minifoldSsn.value : undefined,
+              threshold: provider.value === 'minifold' ? minifoldThreshold.value : undefined,
             }
           )
+
+          if (result.taskId && (result as any).status === 'running') {
+            entry.task.engineTaskId = result.taskId
+            // For async tasks, we don't mark as success yet
+            continue 
+          }
 
           entry.task.status = 'success'
           entry.task.result = result
@@ -279,9 +295,9 @@ export const usePredictionStore = defineStore('prediction', () => {
   loadSettings()
   normalizeAfterProviderChange()
 
-  watch([provider, baseUrl, moleculeType, model, name, submitMode, rememberApiKey, apiKey], () => {
+  watch([provider, baseUrl, moleculeType, model, name, submitMode, rememberApiKey, apiKey, tasks], () => {
     persistSettings()
-  })
+  }, { deep: true })
 
   watch(provider, () => {
     normalizeAfterProviderChange()
@@ -292,6 +308,46 @@ export const usePredictionStore = defineStore('prediction', () => {
       submitMode.value = 'single'
     }
   })
+
+  async function fetchTaskLogs(engineTaskId: string, frontendId: string) {
+    if (!engineTaskId || !frontendId) return
+    try {
+      const logs = await getMiniFoldLogs(engineTaskId)
+      if (logs) {
+        taskLogs.value[frontendId] = logs
+      }
+    } catch (e) {
+      console.error('Failed to fetch logs:', e)
+    }
+  }
+
+  async function fetchTaskResult(task: PredictionTask) {
+    if (!task.engineTaskId) return
+    try {
+      const body = await getMiniFoldResult(task.engineTaskId)
+      if (body.status === 'success') {
+        task.status = 'success'
+        task.result = {
+          providerName: 'MiniFold',
+          modelName: 'MiniFold-v1',
+          format: 'pdb',
+          structure: body.pdb,
+          analysis: body.analysis,
+        }
+        if (task.id === activeTaskId.value) {
+          setViewer(body.pdb, 'pdb')
+        }
+        return true // Finished
+      } else if (body.status === 'failed') {
+        task.status = 'error'
+        task.error = body.error || '预测失败'
+        return true // Finished
+      }
+    } catch (e: any) {
+      console.error('Failed to fetch result:', e)
+    }
+    return false // Still running
+  }
 
   return {
     provider,
@@ -304,6 +360,7 @@ export const usePredictionStore = defineStore('prediction', () => {
     submitMode,
     sequence,
     smiles,
+    envText,
     supportedModels,
     supportedTypes,
     tasks,
@@ -311,11 +368,15 @@ export const usePredictionStore = defineStore('prediction', () => {
     activeTaskId,
     isSubmitting,
     error,
+    minifoldSsn,
+    minifoldThreshold,
+    taskLogs,
     viewerUrl,
     viewerFormat,
     lastStructureText,
     submit,
     selectTask,
+    fetchTaskLogs,
     clearApiKey,
   }
 })

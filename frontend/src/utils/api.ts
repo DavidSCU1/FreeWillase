@@ -137,3 +137,18 @@ export function predictRnaFold(payload: RnaFoldRequest) {
     body: JSON.stringify(payload),
   })
 }
+
+export function predictMiniFold(payload: any) {
+  return request<any>('/api/prediction/minifold', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getMiniFoldLogs(taskId: string) {
+  return request<string>(`/api/prediction/minifold/logs/${taskId}`)
+}
+
+export function getMiniFoldResult(taskId: string) {
+  return request<any>(`/api/prediction/minifold/result/${taskId}`)
+}

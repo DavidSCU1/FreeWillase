@@ -1,5 +1,5 @@
 import type { MoleculeType, PredictionConfig, PredictionRequest, PredictionResult } from '@/types'
-import { predictRnaFold } from '@/utils/api'
+import { predictRnaFold, predictMiniFold } from '@/utils/api'
 
 export interface ParsedSequenceRecord {
   name: string
@@ -60,11 +60,11 @@ function getDevProxyBaseUrl(provider: Exclude<PredictionConfig['provider'], 'min
 }
 
 function pickBaseUrl(config: PredictionConfig): string {
-  if (config.provider === 'minifold') throw new Error('MiniFold 已预留接口，不在本次集成范围内')
+  if (config.provider === 'minifold' || config.provider === 'rnafold') return '/api/prediction'
   const baseUrl = (config.baseUrl || '').trim()
   if (baseUrl) return baseUrl
   if (import.meta.env.DEV) return getDevProxyBaseUrl(config.provider)
-  return DEFAULT_BASE_URL[config.provider]
+  return DEFAULT_BASE_URL[config.provider as Exclude<PredictionConfig['provider'], 'minifold' | 'rnafold'>]
 }
 
 function assertApiKey(config: PredictionConfig) {
@@ -408,6 +408,38 @@ export async function predictStructure(config: PredictionConfig, request: Predic
     }) as PredictionResult
     if (!body?.structure?.trim()) throw new Error('RNAfold 返回结构为空')
     return body
+  }
+
+  if (config.provider === 'minifold') {
+    const body = await predictMiniFold({
+      sequence: normalizedSequence,
+      envText: request.envText || '',
+      apiKey: config.apiKey,
+      ssn: request.ssn,
+      threshold: request.threshold,
+    })
+    
+    // For MiniFold, we might get just a taskId or the whole result
+    if (body?.status === 'running' && body?.taskId) {
+      return {
+        providerName: 'MiniFold',
+        modelName: 'MiniFold-v1',
+        format: 'pdb',
+        structure: '',
+        taskId: body.taskId,
+        status: 'running'
+      } as any
+    }
+
+    if (!body?.pdb) throw new Error('MiniFold 返回结构为空')
+
+    return {
+      providerName: 'MiniFold',
+      modelName: 'MiniFold-v1',
+      format: 'pdb',
+      structure: body.pdb,
+      analysis: body.analysis,
+    }
   }
 
   throw new Error('不支持的 provider')

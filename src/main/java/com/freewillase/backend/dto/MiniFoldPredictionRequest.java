@@ -13,4 +13,6 @@ public class MiniFoldPredictionRequest {
     private String sequence;
     private String apiKey;
     private String envText;
+    private Integer ssn;
+    private Double threshold;
 }

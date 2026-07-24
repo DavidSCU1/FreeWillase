@@ -62,7 +62,8 @@ public class ApiExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception ex) {
         log.error("Unhandled exception", ex);
-        return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "服务器内部错误，请稍后再试");
+        String message = ex.getMessage() != null ? ex.getMessage() : "服务器内部错误，请稍后再试";
+        return buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, message);
     }
 
     private ResponseEntity<ErrorResponse> buildErrorResponse(HttpStatus status, String message) {
