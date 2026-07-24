@@ -16,20 +16,10 @@ export default defineConfig({
         target: 'http://localhost:8081',
         changeOrigin: true,
       },
-      '/proxy/biohub': {
-        target: 'https://www.biohub.ai',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/proxy\/biohub/, ''),
-      },
       '/proxy/nvidia': {
         target: 'https://health.api.nvidia.com',
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/proxy\/nvidia/, ''),
-      },
-      '/proxy/chai1': {
-        target: 'https://api.biolm.ai',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/proxy\/chai1/, ''),
       },
     },
   },

@@ -13,6 +13,7 @@ type StoredMiniFoldSettings = {
   targetChains?: number | null
   useAcceleration?: boolean
   backend?: MiniFoldBackend
+  condaEnvName?: string
 }
 
 function safeParse<T>(value: string | null): T | null {
@@ -30,6 +31,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
   const targetChains = ref<number | null>(null)
   const useAcceleration = ref(true)
   const backend = ref<MiniFoldBackend>('auto')
+  const condaEnvName = ref('')
 
   const engineTaskId = ref<string | null>(null)
   const status = ref<'idle' | 'running' | 'success' | 'error'>('idle')
@@ -49,6 +51,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     if (saved.targetChains === null || typeof saved.targetChains === 'number') targetChains.value = saved.targetChains
     if (typeof saved.useAcceleration === 'boolean') useAcceleration.value = saved.useAcceleration
     if (saved.backend) backend.value = saved.backend
+    if (typeof saved.condaEnvName === 'string') condaEnvName.value = saved.condaEnvName
   }
 
   function persistSettings() {
@@ -58,6 +61,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
       targetChains: targetChains.value,
       useAcceleration: useAcceleration.value,
       backend: backend.value,
+      condaEnvName: condaEnvName.value,
     }))
   }
 
@@ -107,6 +111,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
         targetChains: targetChains.value ?? undefined,
         useIgpu: useAcceleration.value,
         backend: useAcceleration.value ? backend.value : 'cpu',
+        condaEnvName: condaEnvName.value.trim() || undefined,
       })
 
       if (body?.status === 'running' && body?.taskId) {
@@ -154,7 +159,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
 
   loadSettings()
 
-  watch([sequence, envText, targetChains, useAcceleration, backend], () => {
+  watch([sequence, envText, targetChains, useAcceleration, backend, condaEnvName], () => {
     persistSettings()
   }, { deep: true })
 
@@ -172,6 +177,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     targetChains,
     useAcceleration,
     backend,
+    condaEnvName,
     engineTaskId,
     status,
     error,

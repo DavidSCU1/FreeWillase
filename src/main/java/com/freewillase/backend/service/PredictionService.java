@@ -31,10 +31,11 @@ public class PredictionService {
 
         log.info("Submitting embedded MiniFold task {} for sequence length {}", taskId,
                 request.getSequence() != null ? request.getSequence().length() : 0);
-        log.info("Params: targetChains={}, useIgpu={}, backend={}, envText={}",
+        log.info("Params: targetChains={}, useIgpu={}, backend={}, condaEnvName={}, envText={}",
                 request.getTargetChains(),
                 request.getUseIgpu(),
                 request.getBackend(),
+                request.getCondaEnvName(),
                 request.getEnvText());
 
         try {
@@ -43,7 +44,7 @@ public class PredictionService {
             Path payloadPath = taskDir.resolve("request.json");
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(payloadPath.toFile(), payload);
 
-            List<String> command = new ArrayList<>(resolvePythonCommand());
+            List<String> command = new ArrayList<>(resolvePythonCommand(request));
             command.add("-u");
             command.add(getWorkerScript().toString());
             command.add("--task-dir");
@@ -137,10 +138,24 @@ public class PredictionService {
         payload.put("backend", request.getBackend() != null && !request.getBackend().isBlank()
                 ? request.getBackend()
                 : (Boolean.TRUE.equals(request.getUseIgpu()) ? "auto" : "cpu"));
+        payload.put("condaEnvName", defaultString(request.getCondaEnvName()));
         return payload;
     }
 
-    private List<String> resolvePythonCommand() {
+    private List<String> resolvePythonCommand(MiniFoldPredictionRequest request) {
+        String condaEnvName = defaultString(request.getCondaEnvName()).trim();
+        if (!condaEnvName.isEmpty()) {
+            List<String> condaCommand = buildCondaPythonCommand(condaEnvName);
+            if (isPythonAvailable(condaCommand)) {
+                return condaCommand;
+            }
+
+            String detail = isCondaAvailable()
+                    ? "请确认环境名是否存在且可运行 `python`"
+                    : "请确认当前系统可直接调用 conda";
+            throw new IllegalStateException("无法使用指定的 Conda 环境 `" + condaEnvName + "`，" + detail);
+        }
+
         String configured = System.getenv("MINIFOLD_PYTHON");
         if (configured != null && !configured.isBlank()) {
             return List.of(configured.trim());
@@ -161,11 +176,29 @@ public class PredictionService {
         throw new IllegalStateException("未找到可用的 Python 解释器，请安装 Python 或设置环境变量 MINIFOLD_PYTHON");
     }
 
+    private List<String> buildCondaPythonCommand(String condaEnvName) {
+        if (isWindows()) {
+            return List.of("cmd.exe", "/c", "conda", "run", "-n", condaEnvName, "python");
+        }
+        return List.of("conda", "run", "-n", condaEnvName, "python");
+    }
+
+    private boolean isCondaAvailable() {
+        if (isWindows()) {
+            return isCommandSuccessful(List.of("cmd.exe", "/c", "conda", "--version"));
+        }
+        return isCommandSuccessful(List.of("conda", "--version"));
+    }
+
     private boolean isPythonAvailable(List<String> command) {
         List<String> probe = new ArrayList<>(command);
         probe.add("--version");
+        return isCommandSuccessful(probe);
+    }
+
+    private boolean isCommandSuccessful(List<String> command) {
         try {
-            Process process = new ProcessBuilder(probe)
+            Process process = new ProcessBuilder(command)
                     .redirectErrorStream(true)
                     .start();
             int exitCode = process.waitFor();
@@ -176,6 +209,10 @@ public class PredictionService {
             }
             return false;
         }
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
     private Path getProjectRoot() {

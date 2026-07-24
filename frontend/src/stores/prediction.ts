@@ -10,7 +10,7 @@ type StoredSettings = {
   moleculeType: MoleculeType
   model?: string
   name?: string
-  submitMode?: 'single' | 'batch' | 'complex'
+  submitMode?: 'single' | 'batch'
   rememberApiKey?: boolean
   apiKey?: string
   tasks?: PredictionTask[]
@@ -31,18 +31,20 @@ function makeTaskId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+function isSupportedProvider(value: unknown): value is PredictionProvider {
+  return value === 'nvidia' || value === 'rnafold' || value === 'minifold'
+}
+
 export const usePredictionStore = defineStore('prediction', () => {
-  const provider = ref<PredictionProvider>('biohub')
+  const provider = ref<PredictionProvider>('nvidia')
   const apiKey = ref('')
   const rememberApiKey = ref(false)
   const baseUrl = ref('')
   const moleculeType = ref<MoleculeType>('protein')
   const model = ref('')
   const name = ref('Sample')
-  const submitMode = ref<'single' | 'batch' | 'complex'>('single')
+  const submitMode = ref<'single' | 'batch'>('single')
   const sequence = ref('')
-  const smiles = ref('')
-  const envText = ref('')
   const taskLogs = ref<Record<string, string>>({})
 
   const tasks = ref<PredictionTask[]>([])
@@ -51,10 +53,6 @@ export const usePredictionStore = defineStore('prediction', () => {
   const isSubmitting = ref(false)
   const error = ref<string | null>(null)
   
-  // MiniFold Specific Parameters
-  const minifoldSsn = ref(5)
-  const minifoldThreshold = ref(0.5)
-
   const viewerUrl = ref<string | null>(null)
   const viewerFormat = ref<'pdb' | 'mmcif' | 'dot-bracket'>('pdb')
   const lastStructureText = ref<string | null>(null)
@@ -67,12 +65,12 @@ export const usePredictionStore = defineStore('prediction', () => {
   function loadSettings() {
     const saved = safeParse(localStorage.getItem(STORAGE_KEY))
     if (!saved) return
-    if (saved.provider) provider.value = saved.provider
+    if (isSupportedProvider(saved.provider)) provider.value = saved.provider
     if (typeof saved.baseUrl === 'string') baseUrl.value = saved.baseUrl
     if (saved.moleculeType) moleculeType.value = saved.moleculeType
     if (typeof saved.model === 'string') model.value = saved.model
     if (typeof saved.name === 'string') name.value = saved.name
-    if (saved.submitMode === 'single' || saved.submitMode === 'batch' || saved.submitMode === 'complex') {
+    if (saved.submitMode === 'single' || saved.submitMode === 'batch') {
       submitMode.value = saved.submitMode
     }
     rememberApiKey.value = !!saved.rememberApiKey
@@ -117,6 +115,9 @@ export const usePredictionStore = defineStore('prediction', () => {
   }
 
   function normalizeAfterProviderChange() {
+    if (!isSupportedProvider(provider.value)) {
+      provider.value = 'nvidia'
+    }
     const types = getSupportedMoleculeTypes(provider.value)
     if (!types.includes(moleculeType.value)) moleculeType.value = types[0]
     const models = getSupportedModels(provider.value)
@@ -125,16 +126,13 @@ export const usePredictionStore = defineStore('prediction', () => {
     } else if (!models.includes(model.value)) {
       model.value = models[0]
     }
-    if (moleculeType.value === 'ligand' && submitMode.value === 'batch') {
+    if (provider.value === 'minifold') {
+      provider.value = 'nvidia'
+    }
+    if (submitMode.value !== 'single' && provider.value === 'nvidia') {
       submitMode.value = 'single'
     }
-    if (submitMode.value === 'complex' && provider.value !== 'chai1') {
-      submitMode.value = 'single'
-    }
-    if (moleculeType.value === 'ligand' && submitMode.value === 'complex') {
-      submitMode.value = 'single'
-    }
-    if (provider.value === 'nvidia' && submitMode.value !== 'single') {
+    if (submitMode.value !== 'single' && provider.value === 'rnafold') {
       submitMode.value = 'single'
     }
     if (provider.value === 'rnafold') {
@@ -147,11 +145,6 @@ export const usePredictionStore = defineStore('prediction', () => {
   async function submit() {
     error.value = null
     
-    if (submitMode.value !== 'single' && moleculeType.value === 'ligand') {
-      error.value = 'Ligand 当前仅支持单条提交'
-      return
-    }
-
     if (provider.value === 'nvidia' && submitMode.value !== 'single') {
       error.value = 'NVIDIA ESMFold 由于模型限制仅支持单条提交'
       return
@@ -168,50 +161,31 @@ export const usePredictionStore = defineStore('prediction', () => {
       }
     }
 
-    if (submitMode.value === 'complex' && provider.value !== 'chai1') {
-      error.value = '多链复合体模式当前仅支持 Chai-1，请切换 Provider 或改为单条/多条提交'
-      return
-    }
-
     let preparedSequence = sequence.value
     let batchRecords: Array<{ name: string, sequence: string }> = []
-    let complexRecords: Array<{ name: string, sequence: string }> = []
-    let complexTotalLength = 0
-    if (moleculeType.value !== 'ligand') {
-      try {
-        if (submitMode.value === 'batch' || submitMode.value === 'complex') {
-          const records = parseSequenceRecords(sequence.value, moleculeType.value)
-          if (records.length < 2) {
-            error.value = '多条提交模式至少需要 2 条 FASTA 记录'
-            return
-          }
-          if (submitMode.value === 'batch') {
-            batchRecords = records
-            preparedSequence = batchRecords[0].sequence
-          } else {
-            complexRecords = records
-            complexTotalLength = complexRecords.reduce((acc, record) => acc + record.sequence.length, 0)
-          }
-        } else {
-          preparedSequence = normalizeSequenceInput(sequence.value, moleculeType.value)
+    try {
+      if (submitMode.value === 'batch') {
+        const records = parseSequenceRecords(sequence.value, moleculeType.value)
+        if (records.length < 2) {
+          error.value = '多条提交模式至少需要 2 条 FASTA 记录'
+          return
         }
-      } catch (e: any) {
-        error.value = e?.message || '序列格式错误'
-        return
+        batchRecords = records
+        preparedSequence = batchRecords[0].sequence
+      } else {
+        preparedSequence = normalizeSequenceInput(sequence.value, moleculeType.value)
       }
+    } catch (e: any) {
+      error.value = e?.message || '序列格式错误'
+      return
     }
 
     isSubmitting.value = true
 
     try {
-      const lengthOverride = submitMode.value === 'complex' ? complexTotalLength : undefined
-      const records = moleculeType.value === 'ligand'
-        ? [{ name: name.value.trim() || 'Unnamed', sequence: '' }]
-        : (submitMode.value === 'batch'
-          ? batchRecords
-          : submitMode.value === 'complex'
-            ? [{ name: `${name.value.trim() || 'Complex'} (${complexRecords.length} chains)`, sequence: '' }]
-            : [{ name: name.value.trim() || 'Unnamed', sequence: preparedSequence }])
+      const records = submitMode.value === 'batch'
+        ? batchRecords
+        : [{ name: name.value.trim() || 'Unnamed', sequence: preparedSequence }]
 
       const entries = records.map(record => ({
         record,
@@ -222,9 +196,7 @@ export const usePredictionStore = defineStore('prediction', () => {
           provider: provider.value,
           moleculeType: moleculeType.value,
           name: record.name,
-          sequenceLength: moleculeType.value === 'ligand'
-            ? undefined
-            : (lengthOverride ?? record.sequence.length),
+          sequenceLength: record.sequence.length,
         } as PredictionTask,
       }))
 
@@ -244,13 +216,7 @@ export const usePredictionStore = defineStore('prediction', () => {
               name: entry.task.name,
               type: moleculeType.value,
               model: model.value,
-              sequence: (moleculeType.value === 'ligand' || submitMode.value === 'complex') ? undefined : entry.record.sequence,
-              sequenceRecords: submitMode.value === 'complex' ? complexRecords : undefined,
-              smiles: smiles.value,
-              envText: envText.value,
-              // MiniFold specific
-              ssn: provider.value === 'minifold' ? minifoldSsn.value : undefined,
-              threshold: provider.value === 'minifold' ? minifoldThreshold.value : undefined,
+              sequence: entry.record.sequence,
             }
           )
 
@@ -303,12 +269,6 @@ export const usePredictionStore = defineStore('prediction', () => {
     normalizeAfterProviderChange()
   })
 
-  watch(moleculeType, () => {
-    if (moleculeType.value === 'ligand' && submitMode.value !== 'single') {
-      submitMode.value = 'single'
-    }
-  })
-
   async function fetchTaskLogs(engineTaskId: string, frontendId: string) {
     if (!engineTaskId || !frontendId) return
     try {
@@ -359,8 +319,6 @@ export const usePredictionStore = defineStore('prediction', () => {
     name,
     submitMode,
     sequence,
-    smiles,
-    envText,
     supportedModels,
     supportedTypes,
     tasks,
@@ -368,8 +326,6 @@ export const usePredictionStore = defineStore('prediction', () => {
     activeTaskId,
     isSubmitting,
     error,
-    minifoldSsn,
-    minifoldThreshold,
     taskLogs,
     viewerUrl,
     viewerFormat,

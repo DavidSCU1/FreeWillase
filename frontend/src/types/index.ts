@@ -66,9 +66,9 @@ export interface LiteratureRecord {
   savedToLibrary?: boolean
 }
 
-export type PredictionProvider = 'biohub' | 'nvidia' | 'chai1' | 'rnafold' | 'minifold'
+export type PredictionProvider = 'nvidia' | 'rnafold' | 'minifold'
 
-export type MoleculeType = 'protein' | 'RNA' | 'DNA' | 'ligand'
+export type MoleculeType = 'protein' | 'RNA' | 'DNA'
 
 export interface PredictionConfig {
   provider: PredictionProvider
@@ -83,10 +83,7 @@ export interface PredictionRequest {
   model?: string
   sequence?: string
   sequenceRecords?: Array<{ name: string; sequence: string }>
-  smiles?: string
   envText?: string
-  ssn?: number
-  threshold?: number
 }
 
 export interface PredictionResult {

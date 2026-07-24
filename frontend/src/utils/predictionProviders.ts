@@ -7,15 +7,11 @@ export interface ParsedSequenceRecord {
 }
 
 const DEFAULT_BASE_URL: Record<Exclude<PredictionConfig['provider'], 'minifold'>, string> = {
-  biohub: 'https://www.biohub.ai',
   nvidia: 'https://health.api.nvidia.com',
-  chai1: 'https://api.biolm.ai',
   rnafold: '/api/prediction',
 }
 
-const BIOHUB_MODELS = ['esmfold2-fast-2026-05', 'esmfold2-2026-05', 'esm3-open-2024-03'] as const
 const NVIDIA_MODELS = ['esmfold'] as const
-const CHAI1_MODELS = ['chai1'] as const
 const MINIFOLD_MODELS = ['MiniFold-v1 (Ark Hybrid)'] as const
 const RNAFOLD_MODELS = ['rnafold'] as const
 
@@ -38,18 +34,14 @@ const SEQUENCE_RULES = {
 } as const
 
 export function getSupportedModels(provider: PredictionConfig['provider']): string[] {
-  if (provider === 'biohub') return [...BIOHUB_MODELS]
   if (provider === 'nvidia') return [...NVIDIA_MODELS]
-  if (provider === 'chai1') return [...CHAI1_MODELS]
   if (provider === 'minifold') return [...MINIFOLD_MODELS]
   if (provider === 'rnafold') return [...RNAFOLD_MODELS]
   return []
 }
 
 export function getSupportedMoleculeTypes(provider: PredictionConfig['provider']): MoleculeType[] {
-  if (provider === 'biohub') return ['protein', 'RNA', 'DNA']
   if (provider === 'nvidia') return ['protein']
-  if (provider === 'chai1') return ['protein', 'RNA', 'DNA', 'ligand']
   if (provider === 'rnafold') return ['RNA']
   return ['protein']
 }
@@ -73,10 +65,6 @@ function assertApiKey(config: PredictionConfig) {
 }
 
 function assertSequenceFor(type: MoleculeType, request: PredictionRequest) {
-  if (type === 'ligand') {
-    if (!request.smiles?.trim()) throw new Error('Ligand 类型需要填写 SMILES')
-    return
-  }
   if (!request.sequence?.trim() && (!request.sequenceRecords || request.sequenceRecords.length === 0)) {
     throw new Error('请填写序列')
   }
@@ -87,7 +75,7 @@ function normalizeRecordName(name: string | undefined, index: number) {
   return value || `Sequence ${index + 1}`
 }
 
-function validateSequence(sequence: string, type: Exclude<MoleculeType, 'ligand'>) {
+function validateSequence(sequence: string, type: MoleculeType) {
   const rule = SEQUENCE_RULES[type]
   if (!rule.fullPattern.test(sequence)) {
     const invalidChars = Array.from(new Set(sequence.split('').filter(char => !rule.charPattern.test(char)))).join(', ')
@@ -95,7 +83,7 @@ function validateSequence(sequence: string, type: Exclude<MoleculeType, 'ligand'
   }
 }
 
-export function parseSequenceRecords(raw: string, type: Exclude<MoleculeType, 'ligand'>): ParsedSequenceRecord[] {
+export function parseSequenceRecords(raw: string, type: MoleculeType): ParsedSequenceRecord[] {
   const lines = raw
     .split(/\r?\n/)
     .map(line => line.trim())
@@ -155,7 +143,7 @@ export function parseSequenceRecords(raw: string, type: Exclude<MoleculeType, 'l
   return records
 }
 
-export function normalizeSequenceInput(raw: string, type: Exclude<MoleculeType, 'ligand'>): string {
+export function normalizeSequenceInput(raw: string, type: MoleculeType): string {
   const records = parseSequenceRecords(raw, type)
   if (records.length > 1) {
     throw new Error('检测到多条 FASTA 记录。当前为单条提交模式，请切换为多条提交，或仅保留一条记录。')
@@ -164,7 +152,6 @@ export function normalizeSequenceInput(raw: string, type: Exclude<MoleculeType, 
 }
 
 function normalizeSequenceRecordsInput(request: PredictionRequest): ParsedSequenceRecord[] {
-  if (request.type === 'ligand') return []
   const type = request.type
   const provided = request.sequenceRecords || []
   if (provided.length > 0) {
@@ -191,16 +178,9 @@ function looksLikeJson(text: string) {
   return t.startsWith('{') || t.startsWith('[')
 }
 
-function normalizeName(name: string) {
-  const n = name.trim()
-  return n || 'Unnamed'
-}
-
 function getProviderLabel(provider: Exclude<PredictionConfig['provider'], 'minifold'>) {
-  if (provider === 'biohub') return 'Biohub'
   if (provider === 'nvidia') return 'NVIDIA ESMFold'
-  if (provider === 'rnafold') return 'RNAfold'
-  return 'Chai-1'
+  return 'RNAfold'
 }
 
 function formatHttpError(
@@ -275,44 +255,10 @@ export async function predictStructure(config: PredictionConfig, request: Predic
   const normalizedRecords = normalizeSequenceRecordsInput(request)
   const normalizedSequence = normalizedRecords[0]?.sequence
 
-  if (config.provider === 'biohub') {
-    if (request.type !== 'protein' && request.type !== 'RNA' && request.type !== 'DNA') {
-      throw new Error('Biohub 仅支持 protein/RNA/DNA')
-    }
-    if (normalizedRecords.length !== 1) {
-      throw new Error('Biohub 当前仅支持单条序列（单链）预测。多链复合体请切换到 Chai-1。')
-    }
-
-    const baseUrl = pickBaseUrl(config)
-    const text = await requestWithGuidance(config.provider, `${baseUrl}/api/v1/fold`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.apiKey.trim()}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        model: request.model?.trim() || 'esmfold2-fast-2026-05',
-        sequence: normalizedSequence,
-      }),
-    })
-    const body = JSON.parse(text) as { pdb?: string; plddt?: number; ptm?: number }
-    if (!body?.pdb?.trim()) throw new Error('Biohub 返回结构为空')
-
-    return {
-      providerName: 'Biohub',
-      modelName: request.model?.trim() || 'esmfold2-fast-2026-05',
-      format: 'pdb',
-      structure: body.pdb,
-      plddt: body.plddt,
-      ptm: body.ptm,
-    }
-  }
-
   if (config.provider === 'nvidia') {
     if (request.type !== 'protein') throw new Error('NVIDIA ESMFold 仅支持 protein')
     if (normalizedRecords.length !== 1) {
-      throw new Error('NVIDIA ESMFold 当前仅支持单条序列（单链）预测。多链复合体请切换到 Chai-1。')
+      throw new Error('NVIDIA ESMFold 当前仅支持单条序列预测。请切换为单条模式后重试。')
     }
 
     const baseUrl = pickBaseUrl(config)
@@ -355,50 +301,6 @@ export async function predictStructure(config: PredictionConfig, request: Predic
     }
   }
 
-  if (config.provider === 'chai1') {
-    const baseUrl = pickBaseUrl(config)
-    const item = {
-      molecules: [
-        ...(request.type === 'ligand'
-          ? [{ name: normalizeName(request.name), type: 'ligand', smiles: request.smiles }]
-          : normalizedRecords.map(record => ({ name: normalizeName(record.name), type: request.type, sequence: record.sequence }))),
-      ],
-    }
-
-    const text = await requestWithGuidance(config.provider, `${baseUrl}/api/v3/chai1/predict`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${config.apiKey.trim()}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        params: {
-          num_trunk_recycles: 3,
-          num_diffusion_timesteps: 180,
-          num_diffn_samples: 1,
-          use_esm_embeddings: true,
-          seed: 42,
-          include: [],
-        },
-        items: [item],
-      }),
-    })
-    const body = JSON.parse(text) as {
-      items?: Array<{ outputs?: { cif?: string; avg_plddt?: number } }>
-    }
-    const cif = body.items?.[0]?.outputs?.cif
-    if (!cif?.trim()) throw new Error('Chai-1 返回结构为空')
-
-    return {
-      providerName: 'Chai-1 (bioLM.ai)',
-      modelName: request.model?.trim() || 'chai1',
-      format: 'mmcif',
-      structure: cif,
-      plddt: body.items?.[0]?.outputs?.avg_plddt,
-    }
-  }
-
   if (config.provider === 'rnafold') {
     if (request.type !== 'RNA') throw new Error('RNAfold 仅支持 RNA')
     if (normalizedRecords.length !== 1) throw new Error('RNAfold 当前仅支持单条 RNA 序列')
@@ -415,8 +317,6 @@ export async function predictStructure(config: PredictionConfig, request: Predic
       sequence: normalizedSequence,
       envText: request.envText || '',
       apiKey: config.apiKey,
-      ssn: request.ssn,
-      threshold: request.threshold,
     })
     
     // For MiniFold, we might get just a taskId or the whole result

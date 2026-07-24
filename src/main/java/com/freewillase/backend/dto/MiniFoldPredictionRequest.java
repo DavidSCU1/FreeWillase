@@ -15,4 +15,5 @@ public class MiniFoldPredictionRequest {
     private Integer targetChains;
     private Boolean useIgpu;
     private String backend;
+    private String condaEnvName;
 }
