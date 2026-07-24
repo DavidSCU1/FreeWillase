@@ -237,6 +237,13 @@ onBeforeUnmount(() => {
                     >
                       {{ item.savedToLibrary ? '已入库' : '未入库' }}
                     </div>
+                        <div
+                          v-if="item.savedToLibrary"
+                          class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase"
+                          :class="item.attachmentStatus === 'DOWNLOADED' ? 'bg-apple-green/10 text-apple-green' : item.attachmentStatus === 'NOT_OPEN_ACCESS' ? 'bg-amber-500/10 text-amber-500' : item.attachmentStatus === 'FAILED' ? 'bg-red-500/10 text-red-500' : 'bg-black/5 text-apple-secondary-text'"
+                        >
+                          {{ item.attachmentStatus === 'DOWNLOADED' ? '全文附件已入库' : item.attachmentStatus === 'NOT_OPEN_ACCESS' ? '无开放全文' : item.attachmentStatus === 'FAILED' ? '附件抓取失败' : '待抓取全文' }}
+                        </div>
                     <span class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">PMID: {{ item.pmid }}</span>
                   </div>
                   <div class="flex items-center gap-2">

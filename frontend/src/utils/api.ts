@@ -112,6 +112,40 @@ export function getEnzymeLiteratures(enzymeId: number) {
   return request<LiteratureRecord[]>(`/api/enzymes/${enzymeId}/literatures`)
 }
 
+export function importEnzymeLiteratureFile(enzymeId: number, filePath: string) {
+  return request<LiteratureRecord>(`/api/enzymes/${enzymeId}/literatures/import`, {
+    method: 'POST',
+    body: JSON.stringify({ filePath }),
+  })
+}
+
+export async function uploadEnzymeLiteratureFile(enzymeId: number, file: File) {
+  const token = localStorage.getItem('token')
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch(`/api/enzymes/${enzymeId}/literatures/upload`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  })
+
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    window.location.href = '/login'
+    throw new Error('未授权，请重新登录')
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => null)
+    throw new Error(text || '上传本地文献失败')
+  }
+
+  return response.json() as Promise<LiteratureRecord>
+}
+
 export function listAllLiteratures() {
   return request<LiteratureRecord[]>('/api/literatures')
 }
@@ -131,9 +165,34 @@ export function matchAllLiteratures(data: { ncbiEmail?: string, ncbiApiKey?: str
 }
 
 export function downloadLiteratureRelation(relationId: number) {
-  return request<void>(`/api/literatures/relations/${relationId}/download`, {
+  return request<LiteratureRecord>(`/api/literatures/relations/${relationId}/download`, {
     method: 'POST',
   })
+}
+
+export async function downloadLiteratureAttachment(literatureId: number) {
+  const token = localStorage.getItem('token')
+  const response = await fetch(`/api/literatures/${literatureId}/attachment`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+
+  if (response.status === 401) {
+    localStorage.removeItem('token')
+    window.location.href = '/login'
+    throw new Error('未授权，请重新登录')
+  }
+
+  if (!response.ok) {
+    throw new Error('下载本地附件失败')
+  }
+
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const fileNameMatch = disposition.match(/filename="?(.*?)"?$/i)
+  const fileName = fileNameMatch?.[1] || `literature-${literatureId}.xml`
+  const blob = await response.blob()
+  return { blob, fileName }
 }
 
 export function getDashboardStats() {

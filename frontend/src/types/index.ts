@@ -52,6 +52,11 @@ export interface LiteratureRecord {
   abstractText?: string
   sourceDb?: string
   sourceUrl?: string
+  attachmentStatus?: string
+  attachmentFileName?: string
+  attachmentContentType?: string
+  attachmentSize?: number
+  attachmentSourceUrl?: string
   createdAt: string
   confidenceScore?: number
   confidenceLevel?: string

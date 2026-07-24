@@ -28,6 +28,12 @@ public class LiteratureRecord {
     private String abstractText;
     private String sourceDb;
     private String sourceUrl;
+    private String attachmentStatus;
+    private String attachmentFileName;
+    private String attachmentPath;
+    private String attachmentContentType;
+    private Long attachmentSize;
+    private String attachmentSourceUrl;
     private LocalDateTime createdAt;
 
     @com.baomidou.mybatisplus.annotation.TableField(exist = false)

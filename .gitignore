@@ -41,6 +41,7 @@ src/main/resources/application-local.properties
 python_engine/.env
 minifold_runtime/.env
 minifold_runtime/.env.*
+storage/
 
 # --- Docker ---
 .docker/

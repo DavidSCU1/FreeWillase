@@ -12,12 +12,19 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -28,10 +35,19 @@ public class LiteratureMatchService {
     private final LiteratureRelationMapper relationMapper;
     private final EnzymeEntryMapper enzymeMapper;
     private final NcbiEutilsClient ncbiClient;
+    @org.springframework.beans.factory.annotation.Value("${app.storage.literature-dir:storage/literature}")
+    private String literatureStorageDir;
     
     @org.springframework.beans.factory.annotation.Autowired
     @Lazy
     private LiteratureMatchService self;
+
+    private static final String ATTACHMENT_STATUS_NONE = "NONE";
+    private static final String ATTACHMENT_STATUS_DOWNLOADED = "DOWNLOADED";
+    private static final String ATTACHMENT_STATUS_NOT_OPEN_ACCESS = "NOT_OPEN_ACCESS";
+    private static final String ATTACHMENT_STATUS_FAILED = "FAILED";
+    private static final String SOURCE_DB_LOCAL_UPLOAD = "LOCAL_UPLOAD";
+    private static final Pattern XML_TAG_PATTERN = Pattern.compile("(?is)<[^>]+>");
 
     @Transactional
     public void matchLiteratureForEnzyme(Long enzymeId, String email, String apiKey) {
@@ -122,6 +138,7 @@ public class LiteratureMatchService {
                 .abstractText("PubMed metadata matching...")
                 .sourceDb("PubMed")
                 .sourceUrl(buildPubMedUrl(pubMed.getPmid()))
+                .attachmentStatus(ATTACHMENT_STATUS_NONE)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -236,16 +253,24 @@ public class LiteratureMatchService {
     }
 
     @Transactional
-    public void downloadLiterature(Long relationId) {
+    public LiteratureRecord downloadLiterature(Long relationId) {
         LiteratureRelation relation = relationMapper.selectById(relationId);
         if (relation == null) {
             throw new IllegalArgumentException("未找到对应的文献匹配记录");
         }
-        if (Boolean.TRUE.equals(relation.getSavedToLibrary())) {
-            return;
+        if (!Boolean.TRUE.equals(relation.getSavedToLibrary())) {
+            relation.setSavedToLibrary(true);
+            relationMapper.updateById(relation);
         }
-        relation.setSavedToLibrary(true);
-        relationMapper.updateById(relation);
+
+        LiteratureRecord record = literatureMapper.selectById(relation.getLiteratureId());
+        if (record == null) {
+            throw new IllegalArgumentException("未找到对应的文献记录");
+        }
+
+        enrichWithFullTextAttachment(record);
+        literatureMapper.updateById(record);
+        return buildDisplayRecord(relation, record);
     }
 
     public List<LiteratureRecord> listAll() {
@@ -253,6 +278,94 @@ public class LiteratureMatchService {
                 .orderByDesc(LiteratureRelation::getSavedToLibrary)
                 .orderByDesc(LiteratureRelation::getConfidenceScore));
         return buildDisplayRecords(relations);
+    }
+
+    public LiteratureRecord getLiteratureById(Long literatureId) {
+        return literatureMapper.selectById(literatureId);
+    }
+
+    @Transactional
+    public LiteratureRecord importLiteratureFromLocalFile(Long enzymeId, String filePath) {
+        EnzymeEntry enzyme = enzymeMapper.selectById(enzymeId);
+        if (enzyme == null) {
+            throw new IllegalArgumentException("未找到对应的酶条目");
+        }
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException("请输入有效的本地文件路径");
+        }
+
+        Path sourcePath = Paths.get(filePath.trim()).toAbsolutePath().normalize();
+        if (!Files.exists(sourcePath) || !Files.isRegularFile(sourcePath)) {
+            throw new IllegalArgumentException("指定文件不存在或不是有效文件");
+        }
+
+        String normalizedSource = sourcePath.toString();
+        LiteratureRecord existingRecord = literatureMapper.selectOne(new LambdaQueryWrapper<LiteratureRecord>()
+                .eq(LiteratureRecord::getSourceDb, SOURCE_DB_LOCAL_UPLOAD)
+                .eq(LiteratureRecord::getAttachmentSourceUrl, normalizedSource));
+
+        LiteratureRecord record;
+        if (existingRecord == null) {
+            record = createLocalUploadRecord(sourcePath);
+            literatureMapper.insert(record);
+        } else {
+            record = existingRecord;
+            if (!attachmentExists(record.getAttachmentPath())) {
+                copyLocalAttachment(sourcePath, record);
+                literatureMapper.updateById(record);
+            }
+        }
+
+        LiteratureRelation relation = relationMapper.selectOne(new LambdaQueryWrapper<LiteratureRelation>()
+                .eq(LiteratureRelation::getLiteratureId, record.getId())
+                .eq(LiteratureRelation::getEnzymeId, enzymeId));
+        if (relation == null) {
+            relation = LiteratureRelation.builder()
+                    .literatureId(record.getId())
+                    .enzymeId(enzymeId)
+                    .relationType("MANUAL_UPLOAD")
+                    .confidenceLevel("MANUAL")
+                    .confidenceScore(BigDecimal.valueOf(100))
+                    .matchedFields("Local file import")
+                    .note("用户手动导入本地文献附件")
+                    .savedToLibrary(true)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+            relationMapper.insert(relation);
+        } else if (!Boolean.TRUE.equals(relation.getSavedToLibrary())) {
+            relation.setSavedToLibrary(true);
+            relationMapper.updateById(relation);
+        }
+
+        return buildDisplayRecord(relation, record);
+    }
+
+    @Transactional
+    public LiteratureRecord importLiteratureFromUpload(Long enzymeId, MultipartFile file) {
+        EnzymeEntry enzyme = enzymeMapper.selectById(enzymeId);
+        if (enzyme == null) {
+            throw new IllegalArgumentException("未找到对应的酶条目");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("请选择要上传的本地文件");
+        }
+
+        LiteratureRecord record = createUploadedRecord(file);
+        literatureMapper.insert(record);
+
+        LiteratureRelation relation = LiteratureRelation.builder()
+                .literatureId(record.getId())
+                .enzymeId(enzymeId)
+                .relationType("MANUAL_UPLOAD")
+                .confidenceLevel("MANUAL")
+                .confidenceScore(BigDecimal.valueOf(100))
+                .matchedFields("Browser file upload")
+                .note("用户通过文件选择器上传本地文献附件")
+                .savedToLibrary(true)
+                .createdAt(LocalDateTime.now())
+                .build();
+        relationMapper.insert(relation);
+        return buildDisplayRecord(relation, record);
     }
 
     private List<EnzymeEntry> loadTargetEnzymes(List<Long> enzymeIds) {
@@ -283,6 +396,12 @@ public class LiteratureMatchService {
                     .abstractText(record.getAbstractText())
                     .sourceDb(record.getSourceDb())
                     .sourceUrl(record.getSourceUrl())
+                    .attachmentStatus(record.getAttachmentStatus())
+                    .attachmentFileName(record.getAttachmentFileName())
+                    .attachmentPath(record.getAttachmentPath())
+                    .attachmentContentType(record.getAttachmentContentType())
+                    .attachmentSize(record.getAttachmentSize())
+                    .attachmentSourceUrl(record.getAttachmentSourceUrl())
                     .createdAt(record.getCreatedAt())
                     .confidenceScore(rel.getConfidenceScore())
                     .confidenceLevel(rel.getConfidenceLevel())
@@ -300,6 +419,216 @@ public class LiteratureMatchService {
             result.add(displayRecord);
         }
         return result;
+    }
+
+    private LiteratureRecord buildDisplayRecord(LiteratureRelation relation, LiteratureRecord record) {
+        LiteratureRecord displayRecord = LiteratureRecord.builder()
+                .id(record.getId())
+                .title(record.getTitle())
+                .authors(record.getAuthors())
+                .journal(record.getJournal())
+                .publishYear(record.getPublishYear())
+                .doi(record.getDoi())
+                .pmid(record.getPmid())
+                .keywords(record.getKeywords())
+                .abstractText(record.getAbstractText())
+                .sourceDb(record.getSourceDb())
+                .sourceUrl(record.getSourceUrl())
+                .attachmentStatus(record.getAttachmentStatus())
+                .attachmentFileName(record.getAttachmentFileName())
+                .attachmentPath(record.getAttachmentPath())
+                .attachmentContentType(record.getAttachmentContentType())
+                .attachmentSize(record.getAttachmentSize())
+                .attachmentSourceUrl(record.getAttachmentSourceUrl())
+                .createdAt(record.getCreatedAt())
+                .confidenceScore(relation.getConfidenceScore())
+                .confidenceLevel(relation.getConfidenceLevel())
+                .relationId(relation.getId())
+                .enzymeId(relation.getEnzymeId())
+                .matchedFields(relation.getMatchedFields())
+                .savedToLibrary(Boolean.TRUE.equals(relation.getSavedToLibrary()))
+                .build();
+
+        EnzymeEntry enzyme = enzymeMapper.selectById(relation.getEnzymeId());
+        if (enzyme != null) {
+            displayRecord.setMatchedEnzymeName(enzyme.getName());
+            displayRecord.setMatchedEnzymeAccession(enzyme.getProteinAccession());
+        }
+        return displayRecord;
+    }
+
+    private void enrichWithFullTextAttachment(LiteratureRecord record) {
+        if (ATTACHMENT_STATUS_DOWNLOADED.equals(record.getAttachmentStatus()) && attachmentExists(record.getAttachmentPath())) {
+            return;
+        }
+        if (record.getPmid() == null || record.getPmid().isBlank()) {
+            record.setAttachmentStatus(ATTACHMENT_STATUS_FAILED);
+            return;
+        }
+
+        try {
+            NcbiEutilsClient.PmcFullTextResult fullTextResult = ncbiClient.fetchPmcFullTextByPmid(record.getPmid(), null, null);
+            if (fullTextResult == null || fullTextResult.getXmlContent() == null || fullTextResult.getXmlContent().isBlank()) {
+                record.setAttachmentStatus(ATTACHMENT_STATUS_NOT_OPEN_ACCESS);
+                record.setAttachmentFileName(null);
+                record.setAttachmentPath(null);
+                record.setAttachmentContentType(null);
+                record.setAttachmentSize(null);
+                record.setAttachmentSourceUrl(null);
+                return;
+            }
+
+            Path storageDir = Paths.get(literatureStorageDir).toAbsolutePath().normalize();
+            Files.createDirectories(storageDir);
+
+            String baseName = buildAttachmentBaseName(record, fullTextResult.getPmcId());
+            Path attachmentPath = storageDir.resolve(baseName + ".xml");
+            byte[] content = fullTextResult.getXmlContent().getBytes(StandardCharsets.UTF_8);
+            Files.write(attachmentPath, content);
+
+            record.setAttachmentStatus(ATTACHMENT_STATUS_DOWNLOADED);
+            record.setAttachmentFileName(attachmentPath.getFileName().toString());
+            record.setAttachmentPath(attachmentPath.toString());
+            record.setAttachmentContentType("application/xml");
+            record.setAttachmentSize((long) content.length);
+            record.setAttachmentSourceUrl(fullTextResult.getSourceUrl());
+
+            if (record.getAbstractText() == null
+                    || record.getAbstractText().isBlank()
+                    || "PubMed metadata matching...".equals(record.getAbstractText())) {
+                String abstractText = extractAbstractText(fullTextResult.getXmlContent());
+                if (abstractText != null && !abstractText.isBlank()) {
+                    record.setAbstractText(abstractText);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to download full text attachment for PMID {}: {}", record.getPmid(), e.getMessage());
+            record.setAttachmentStatus(ATTACHMENT_STATUS_FAILED);
+        }
+    }
+
+    private boolean attachmentExists(String attachmentPath) {
+        if (attachmentPath == null || attachmentPath.isBlank()) {
+            return false;
+        }
+        return Files.exists(Paths.get(attachmentPath));
+    }
+
+    private LiteratureRecord createLocalUploadRecord(Path sourcePath) {
+        String fileName = sourcePath.getFileName().toString();
+        String baseName = stripExtension(fileName);
+        LiteratureRecord record = LiteratureRecord.builder()
+                .title(baseName)
+                .authors("用户手动导入")
+                .journal("本地文件")
+                .publishYear(LocalDateTime.now().getYear())
+                .pmid("LOCAL-" + System.currentTimeMillis())
+                .abstractText("用户从酶库中心手动导入的本地文献附件")
+                .sourceDb(SOURCE_DB_LOCAL_UPLOAD)
+                .sourceUrl(null)
+                .attachmentStatus(ATTACHMENT_STATUS_DOWNLOADED)
+                .attachmentSourceUrl(sourcePath.toString())
+                .createdAt(LocalDateTime.now())
+                .build();
+        copyLocalAttachment(sourcePath, record);
+        return record;
+    }
+
+    private LiteratureRecord createUploadedRecord(MultipartFile file) {
+        String originalFileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "uploaded-literature";
+        String baseName = stripExtension(originalFileName);
+        LiteratureRecord record = LiteratureRecord.builder()
+                .title(baseName)
+                .authors("用户手动导入")
+                .journal("本地上传文件")
+                .publishYear(LocalDateTime.now().getYear())
+                .pmid("UPLOAD-" + System.currentTimeMillis())
+                .abstractText("用户通过文件选择器上传的本地文献附件")
+                .sourceDb(SOURCE_DB_LOCAL_UPLOAD)
+                .sourceUrl(null)
+                .attachmentStatus(ATTACHMENT_STATUS_DOWNLOADED)
+                .createdAt(LocalDateTime.now())
+                .build();
+        copyUploadedAttachment(file, record);
+        return record;
+    }
+
+    private void copyLocalAttachment(Path sourcePath, LiteratureRecord record) {
+        try {
+            Path storageDir = Paths.get(literatureStorageDir, "manual").toAbsolutePath().normalize();
+            Files.createDirectories(storageDir);
+            String extension = readExtension(sourcePath.getFileName().toString());
+            String safeBaseName = buildAttachmentBaseName(record, "LOCAL_" + System.currentTimeMillis());
+            Path targetPath = storageDir.resolve(safeBaseName + extension);
+            Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+
+            String contentType = Files.probeContentType(targetPath);
+            record.setAttachmentStatus(ATTACHMENT_STATUS_DOWNLOADED);
+            record.setAttachmentFileName(targetPath.getFileName().toString());
+            record.setAttachmentPath(targetPath.toString());
+            record.setAttachmentContentType(contentType != null ? contentType : "application/octet-stream");
+            record.setAttachmentSize(Files.size(targetPath));
+            record.setAttachmentSourceUrl(sourcePath.toString());
+        } catch (Exception e) {
+            throw new IllegalStateException("复制本地文献附件失败: " + e.getMessage(), e);
+        }
+    }
+
+    private void copyUploadedAttachment(MultipartFile file, LiteratureRecord record) {
+        try {
+            Path storageDir = Paths.get(literatureStorageDir, "manual").toAbsolutePath().normalize();
+            Files.createDirectories(storageDir);
+            String originalFileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "uploaded-literature";
+            String extension = readExtension(originalFileName);
+            String safeBaseName = buildAttachmentBaseName(record, "UPLOAD_" + System.currentTimeMillis());
+            Path targetPath = storageDir.resolve(safeBaseName + extension);
+            file.transferTo(targetPath);
+
+            String contentType = file.getContentType();
+            if (contentType == null || contentType.isBlank()) {
+                contentType = Files.probeContentType(targetPath);
+            }
+
+            record.setAttachmentStatus(ATTACHMENT_STATUS_DOWNLOADED);
+            record.setAttachmentFileName(originalFileName);
+            record.setAttachmentPath(targetPath.toString());
+            record.setAttachmentContentType(contentType != null ? contentType : "application/octet-stream");
+            record.setAttachmentSize(Files.size(targetPath));
+            record.setAttachmentSourceUrl("upload:" + originalFileName);
+        } catch (Exception e) {
+            throw new IllegalStateException("保存上传文献附件失败: " + e.getMessage(), e);
+        }
+    }
+
+    private String buildAttachmentBaseName(LiteratureRecord record, String pmcId) {
+        String preferredId = (pmcId != null && !pmcId.isBlank()) ? pmcId : "PMID_" + record.getPmid();
+        return preferredId.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private String stripExtension(String fileName) {
+        int index = fileName.lastIndexOf('.');
+        if (index <= 0) {
+            return fileName;
+        }
+        return fileName.substring(0, index);
+    }
+
+    private String readExtension(String fileName) {
+        int index = fileName.lastIndexOf('.');
+        if (index < 0) {
+            return "";
+        }
+        return fileName.substring(index);
+    }
+
+    private String extractAbstractText(String xmlContent) {
+        java.util.regex.Matcher matcher = Pattern.compile("(?is)<abstract[^>]*>(.*?)</abstract>").matcher(xmlContent);
+        if (!matcher.find()) {
+            return null;
+        }
+        String abstractBlock = matcher.group(1);
+        String plainText = XML_TAG_PATTERN.matcher(abstractBlock).replaceAll(" ");
+        return plainText.replaceAll("\\s+", " ").trim();
     }
 
     private String buildPubMedUrl(String pmid) {

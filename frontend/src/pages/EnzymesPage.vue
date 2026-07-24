@@ -16,20 +16,34 @@ import {
   Maximize2, 
   Loader2,
   Trash2,
-  Sparkles
+  Sparkles,
+  Upload,
+  X
 } from 'lucide-vue-next'
 import { useNcbiImport } from '@/composables/useNcbiImport'
 import { useLiterature } from '@/composables/useLiterature'
 import StructureViewer from '@/components/StructureViewer.vue'
+import { downloadLiteratureAttachment } from '@/utils/api'
 
 const router = useRouter()
 const { enzymes, refreshEnzymeLibrary, removeEnzyme } = useNcbiImport()
-const { enzymeLiteratures, fetchEnzymeLiteratures, enzymeLoading: loadingLit } = useLiterature()
+const {
+  enzymeLiteratures,
+  fetchEnzymeLiteratures,
+  enzymeLoading: loadingLit,
+  importingEnzymeId,
+  importLocalLiterature,
+} = useLiterature()
 
 const selectedId = ref<number | null>(null)
 const searchQuery = ref('')
 const showFullscreenViewer = ref(false)
+const showImportLiteratureModal = ref(false)
 const isDeleting = ref(false)
+const selectedLiteratureId = ref<number | null>(null)
+const downloadingAttachmentId = ref<number | null>(null)
+const importLiteratureFile = ref<File | null>(null)
+const importLiteratureError = ref('')
 
 async function handleDelete(id: number) {
   if (confirm('确定要放走这只酶吗？一旦放归野外（删除），它的自由意志就不再受你掌控了。')) {
@@ -51,6 +65,59 @@ function handleOpenMatcher() {
     path: '/matcher',
     query: { enzymeId: String(selectedId.value) },
   })
+}
+
+function openImportLiteratureModal() {
+  importLiteratureFile.value = null
+  importLiteratureError.value = ''
+  showImportLiteratureModal.value = true
+}
+
+function closeImportLiteratureModal() {
+  if (importingEnzymeId.value) return
+  showImportLiteratureModal.value = false
+  importLiteratureError.value = ''
+}
+
+function handleImportFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  importLiteratureFile.value = input.files?.[0] ?? null
+  importLiteratureError.value = ''
+}
+
+async function handleDownloadAttachment(literatureId: number) {
+  try {
+    downloadingAttachmentId.value = literatureId
+    const { blob, fileName } = await downloadLiteratureAttachment(literatureId)
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(objectUrl)
+  } finally {
+    downloadingAttachmentId.value = null
+  }
+}
+
+async function handleImportLiterature() {
+  if (!selectedId.value) return
+  if (!importLiteratureFile.value) {
+    importLiteratureError.value = '请选择要导入的本地文件'
+    return
+  }
+
+  try {
+    importLiteratureError.value = ''
+    const imported = await importLocalLiterature(selectedId.value, importLiteratureFile.value)
+    selectedLiteratureId.value = imported.id
+    showImportLiteratureModal.value = false
+    importLiteratureFile.value = null
+  } catch (error) {
+    importLiteratureError.value = error instanceof Error ? error.message : '导入失败，请重试'
+  }
 }
 
 const filteredEnzymes = computed(() => {
@@ -118,14 +185,28 @@ const selectedNcbiUrl = computed(() => {
 })
 
 const selectedUniprotUrl = computed(() => selectedEnzyme.value?.uniprotUrl)
+const selectedLiterature = computed(() => {
+  if (!enzymeLiteratures.value.length) return null
+  if (selectedLiteratureId.value == null) return enzymeLiteratures.value[0]
+  return enzymeLiteratures.value.find((item) => item.id === selectedLiteratureId.value) ?? enzymeLiteratures.value[0]
+})
 
 watch(
   () => selectedId.value,
   (id) => {
     if (id) {
+      selectedLiteratureId.value = null
       fetchEnzymeLiteratures(id)
     }
   }
+)
+
+watch(
+  () => enzymeLiteratures.value,
+  (list) => {
+    selectedLiteratureId.value = list.length ? list[0].id : null
+  },
+  { immediate: true },
 )
 
 watch(
@@ -423,15 +504,26 @@ onMounted(async () => {
                 </div>
                 <h3 class="text-sm font-bold text-apple-text">关联文献</h3>
               </div>
-              <button 
-                @click="handleOpenMatcher"
-                :disabled="loadingLit"
-                class="text-[10px] font-bold text-apple-blue hover:underline disabled:opacity-50 flex items-center gap-1"
-              >
-                <Loader2 v-if="loadingLit" :size="10" class="animate-spin" />
-                <Sparkles v-else :size="10" />
-                去文献匹配页
-              </button>
+              <div class="flex items-center gap-3">
+                <button
+                  @click="openImportLiteratureModal"
+                  :disabled="!selectedId || !!importingEnzymeId"
+                  class="text-[10px] font-bold text-apple-blue hover:underline disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Loader2 v-if="!!importingEnzymeId" :size="10" class="animate-spin" />
+                  <Upload v-else :size="10" />
+                  导入文献
+                </button>
+                <button
+                  @click="handleOpenMatcher"
+                  :disabled="loadingLit"
+                  class="text-[10px] font-bold text-apple-blue hover:underline disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Loader2 v-if="loadingLit" :size="10" class="animate-spin" />
+                  <Sparkles v-else :size="10" />
+                  去文献匹配页
+                </button>
+              </div>
             </div>
             
             <div class="space-y-4">
@@ -441,38 +533,109 @@ onMounted(async () => {
               </div>
 
               <template v-else-if="enzymeLiteratures.length">
-                <div 
-                  v-for="lit in enzymeLiteratures" 
-                  :key="lit.id"
-                  class="p-4 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 group hover:border-apple-green/30 transition-all"
-                >
-                  <div class="flex justify-between items-start mb-2">
-                    <span 
-                      class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
-                      :class="lit.confidenceLevel === 'STRONG' ? 'bg-apple-green/10 text-apple-green' : 'bg-apple-blue/10 text-apple-blue'"
-                    >
-                      {{ lit.confidenceLevel || 'MATCH' }}
-                    </span>
-                    <a
-                      :href="lit.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${lit.pmid}/`"
-                      target="_blank"
-                      rel="noreferrer"
-                      class="text-[9px] text-apple-secondary-text font-bold uppercase hover:text-apple-blue"
-                    >
-                      PMID: {{ lit.pmid }}
-                    </a>
-                  </div>
-                  <a
-                    :href="lit.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${lit.pmid}/`"
-                    target="_blank"
-                    rel="noreferrer"
-                    class="block"
+                <div class="space-y-3">
+                  <button
+                    v-for="lit in enzymeLiteratures"
+                    :key="lit.id"
+                    @click="selectedLiteratureId = lit.id"
+                    class="w-full text-left p-4 rounded-apple border bg-apple-background dark:bg-white/5 group transition-all"
+                    :class="selectedLiterature?.id === lit.id ? 'border-apple-blue bg-apple-blue/5' : 'border-apple-border hover:border-apple-green/30'"
                   >
+                    <div class="flex justify-between items-start mb-2">
+                      <span
+                        class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
+                        :class="lit.confidenceLevel === 'STRONG' ? 'bg-apple-green/10 text-apple-green' : lit.confidenceLevel === 'MANUAL' ? 'bg-purple-500/10 text-purple-500' : 'bg-apple-blue/10 text-apple-blue'"
+                      >
+                        {{ lit.confidenceLevel === 'MANUAL' ? 'LOCAL' : (lit.confidenceLevel || 'MATCH') }}
+                      </span>
+                      <span class="text-[9px] text-apple-secondary-text font-bold uppercase">PMID: {{ lit.pmid }}</span>
+                    </div>
                     <h4 class="text-xs font-bold text-apple-text line-clamp-2 leading-snug group-hover:text-apple-blue transition-colors">
                       {{ lit.title }}
                     </h4>
-                  </a>
-                  <p class="mt-2 text-[10px] text-apple-secondary-text italic">{{ lit.journal }}, {{ lit.publishYear }}</p>
+                    <p class="mt-2 text-[10px] text-apple-secondary-text italic">{{ lit.journal }}, {{ lit.publishYear }}</p>
+                  </button>
+                </div>
+
+                <div v-if="selectedLiterature" class="mt-2 p-5 rounded-apple border border-apple-blue/20 bg-apple-blue/5 space-y-4">
+                  <div class="flex items-start justify-between gap-4">
+                    <div class="space-y-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span
+                          class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
+                          :class="selectedLiterature.confidenceLevel === 'STRONG' ? 'bg-apple-green/10 text-apple-green' : selectedLiterature.confidenceLevel === 'MANUAL' ? 'bg-purple-500/10 text-purple-500' : 'bg-apple-blue/10 text-apple-blue'"
+                        >
+                          {{ selectedLiterature.confidenceLevel === 'MANUAL' ? 'LOCAL' : (selectedLiterature.confidenceLevel || 'MATCH') }}
+                        </span>
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
+                          已保存到本地数据库
+                        </span>
+                        <span
+                          class="text-[10px] font-bold uppercase tracking-widest"
+                          :class="selectedLiterature.attachmentStatus === 'DOWNLOADED' ? 'text-apple-green' : 'text-apple-secondary-text'"
+                        >
+                          {{ selectedLiterature.attachmentStatus === 'DOWNLOADED' ? '全文附件已入库' : selectedLiterature.attachmentStatus === 'NOT_OPEN_ACCESS' ? '暂无开放全文' : selectedLiterature.attachmentStatus === 'FAILED' ? '附件抓取失败' : '尚未抓取全文附件' }}
+                        </span>
+                      </div>
+                      <h4 class="text-sm font-bold text-apple-text leading-snug">
+                        {{ selectedLiterature.title }}
+                      </h4>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                      <button
+                        v-if="selectedLiterature.attachmentStatus === 'DOWNLOADED'"
+                        @click="handleDownloadAttachment(selectedLiterature.id)"
+                        class="apple-button-secondary !py-2 !px-3 text-xs flex items-center gap-2"
+                        :disabled="downloadingAttachmentId === selectedLiterature.id"
+                      >
+                        <Loader2 v-if="downloadingAttachmentId === selectedLiterature.id" :size="12" class="animate-spin" />
+                        <Sparkles v-else :size="12" />
+                        下载本地附件
+                      </button>
+                      <a
+                        v-if="selectedLiterature.sourceDb !== 'LOCAL_UPLOAD'"
+                        :href="selectedLiterature.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${selectedLiterature.pmid}/`"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="apple-button-secondary !py-2 !px-3 text-xs flex items-center gap-2"
+                      >
+                        <ExternalLink :size="12" />
+                        官网链接
+                      </a>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">作者</p>
+                      <p class="text-apple-text">{{ selectedLiterature.authors || '暂无作者信息' }}</p>
+                    </div>
+                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">期刊</p>
+                      <p class="text-apple-text">{{ selectedLiterature.journal || '未知期刊' }}，{{ selectedLiterature.publishYear || '未知年份' }}</p>
+                    </div>
+                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">PMID</p>
+                      <p class="text-apple-text">{{ selectedLiterature.pmid }}</p>
+                    </div>
+                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">DOI</p>
+                      <p class="text-apple-text break-all">{{ selectedLiterature.doi || '暂无 DOI' }}</p>
+                    </div>
+                  </div>
+
+                  <div class="p-4 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-2">本地入库内容</p>
+                    <p class="text-xs leading-6 text-apple-text">
+                      {{
+                        selectedLiterature.attachmentStatus === 'DOWNLOADED'
+                          ? '该文献的开放全文附件已经抓取到本地，可通过上方“下载本地附件”按钮获取。当前下方展示的是数据库中的摘要/说明信息。'
+                          : selectedLiterature.abstractText && selectedLiterature.abstractText !== 'PubMed metadata matching...'
+                          ? selectedLiterature.abstractText
+                          : '当前已下载到本地数据库的是 PubMed 文献元数据（标题、作者、期刊、年份、PMID、DOI 和匹配关系）。如果这篇文献没有开放 PMC 全文，系统会保留元数据并标记“暂无开放全文”。'
+                      }}
+                    </p>
+                  </div>
                 </div>
               </template>
 
@@ -516,6 +679,70 @@ onMounted(async () => {
             :pdb-id="selectedStructureId"
             :url="selectedStructureUrl"
           />
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div
+        v-if="showImportLiteratureModal"
+        class="fixed inset-0 z-[110] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        @click.self="closeImportLiteratureModal"
+      >
+        <div class="w-full max-w-xl apple-card p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <h3 class="text-lg font-bold text-apple-text">导入本地文献</h3>
+              <p class="text-sm text-apple-secondary-text">
+                为当前酶条目添加本地文献附件。系统会把文件复制到平台存储目录，并在关联文献里显示。
+              </p>
+            </div>
+            <button
+              @click="closeImportLiteratureModal"
+              :disabled="!!importingEnzymeId"
+              class="w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text flex items-center justify-center disabled:opacity-50"
+            >
+              <X :size="16" />
+            </button>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">选择文件</label>
+            <input
+              type="file"
+              class="apple-input w-full"
+              @change="handleImportFileChange"
+              :disabled="!!importingEnzymeId"
+            />
+            <p class="text-xs text-apple-secondary-text">
+              支持直接从本机选择文件。导入后文件会复制到平台本地存储目录，不依赖原始文件继续存在。
+            </p>
+            <p v-if="importLiteratureFile" class="text-xs text-apple-text">
+              已选择：{{ importLiteratureFile.name }}
+            </p>
+            <p v-if="importLiteratureError" class="text-xs text-red-500">
+              {{ importLiteratureError }}
+            </p>
+          </div>
+
+          <div class="flex justify-end gap-3">
+            <button
+              @click="closeImportLiteratureModal"
+              :disabled="!!importingEnzymeId"
+              class="apple-button-secondary !py-2 !px-4 text-xs disabled:opacity-50"
+            >
+              取消
+            </button>
+            <button
+              @click="handleImportLiterature"
+              :disabled="!!importingEnzymeId"
+              class="apple-button !py-2 !px-4 text-xs flex items-center gap-2 disabled:opacity-50"
+            >
+              <Loader2 v-if="!!importingEnzymeId" :size="14" class="animate-spin" />
+              <Upload v-else :size="14" />
+              导入到当前酶
+            </button>
+          </div>
         </div>
       </div>
     </transition>

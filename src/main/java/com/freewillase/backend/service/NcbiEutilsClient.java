@@ -110,6 +110,55 @@ public class NcbiEutilsClient {
         }).collect(java.util.stream.Collectors.toList());
     }
 
+    public PmcFullTextResult fetchPmcFullTextByPmid(String pmid, String email, String apiKey) {
+        Map<String, Object> linkRoot = getJson("/elink.fcgi", query(
+                "dbfrom", "pubmed",
+                "db", "pmc",
+                "id", pmid,
+                "retmode", "json"
+        ), email, apiKey);
+
+        List<Map<String, Object>> linkSets = castList(linkRoot.get("linksets"));
+        if (linkSets.isEmpty()) {
+            return null;
+        }
+
+        List<Map<String, Object>> linkSetDbs = castList(linkSets.get(0).get("linksetdbs"));
+        if (linkSetDbs.isEmpty()) {
+            return null;
+        }
+
+        List<?> links = castRawList(linkSetDbs.get(0).get("links"));
+        if (links.isEmpty() || links.get(0) == null) {
+            return null;
+        }
+
+        String pmcId = links.get(0).toString();
+        UriComponentsBuilder efetchBuilder = UriComponentsBuilder.fromHttpUrl(baseUrl + "/efetch.fcgi")
+                .queryParam("db", "pmc")
+                .queryParam("id", pmcId)
+                .queryParam("retmode", "xml")
+                .queryParam("tool", toolName);
+
+        if (email != null && !email.isBlank()) efetchBuilder.queryParam("email", email);
+        if (apiKey != null && !apiKey.isBlank()) efetchBuilder.queryParam("api_key", apiKey);
+
+        String xmlText = restTemplate.getForObject(
+                efetchBuilder.encode().build().toUri(),
+                String.class
+        );
+
+        if (xmlText == null || xmlText.isBlank()) {
+            return null;
+        }
+
+        return PmcFullTextResult.builder()
+                .pmcId("PMC" + pmcId)
+                .xmlContent(xmlText)
+                .sourceUrl("https://pmc.ncbi.nlm.nih.gov/articles/PMC" + pmcId + "/")
+                .build();
+    }
+
     private String parseAuthors(Map<String, Object> doc) {
         Object authorsNode = doc.get("authors");
         if (authorsNode instanceof List) {
@@ -206,6 +255,22 @@ public class NcbiEutilsClient {
         throw new IllegalStateException("NCBI 返回结构异常");
     }
 
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> castList(Object value) {
+        if (value instanceof List) {
+            return (List<Map<String, Object>>) value;
+        }
+        return List.of();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> castRawList(Object value) {
+        if (value instanceof List) {
+            return (List<Object>) value;
+        }
+        return List.of();
+    }
+
     @lombok.Value
     @Builder
     public static class ProteinLookupResult {
@@ -227,5 +292,13 @@ public class NcbiEutilsClient {
         String journal;
         int publishYear;
         String doi;
+    }
+
+    @lombok.Value
+    @Builder
+    public static class PmcFullTextResult {
+        String pmcId;
+        String xmlContent;
+        String sourceUrl;
     }
 }
