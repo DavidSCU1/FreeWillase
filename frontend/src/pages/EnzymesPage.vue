@@ -201,6 +201,11 @@ const selectedStructureId = computed(() => {
   return enzyme.structureId || enzyme.uniprotAccession || enzyme.accession
 })
 
+const selectedViewerStructureId = computed(() => {
+  if (isPredictedLibrary.value) return undefined
+  return selectedStructureId.value || undefined
+})
+
 const selectedStructureUrl = computed(() => {
   const enzyme = selectedEnzyme.value
   if (isPredictedLibrary.value) return predictedStructureUrl.value || undefined
@@ -580,7 +585,7 @@ onUnmounted(() => {
             
             <div class="flex-1 min-h-[400px] relative group/viewer">
               <StructureViewer 
-                :pdb-id="selectedStructureId"
+                :pdb-id="selectedViewerStructureId"
                 :url="selectedStructureUrl"
                 :source-db="selectedStructureSource"
                 :format="selectedStructureFormat"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   LayoutDashboard,
@@ -10,12 +10,16 @@ import {
   Settings,
   Search,
   ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   LogOut
 } from 'lucide-vue-next'
 import { useAuth } from '@/utils/auth'
 
 const route = useRoute()
 const { logout } = useAuth()
+const SIDEBAR_STORAGE_KEY = 'appSidebarCollapsed'
+const isSidebarCollapsed = ref(false)
 
 const navItems = [
   { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
@@ -28,29 +32,59 @@ const navItems = [
 const isRouteActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
 
 const currentItem = computed(() => navItems.find((item) => isRouteActive(item.to)) || navItems[0])
+
+function toggleSidebar() {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value
+  localStorage.setItem(SIDEBAR_STORAGE_KEY, isSidebarCollapsed.value ? '1' : '0')
+}
+
+onMounted(() => {
+  isSidebarCollapsed.value = localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1'
+})
 </script>
 
 <template>
   <div class="min-h-screen bg-apple-background text-apple-text flex">
     <!-- Sidebar -->
-    <aside class="w-64 border-r border-apple-border flex flex-col apple-glass fixed h-screen z-10">
-      <div class="p-6 flex items-center gap-3">
+    <aside
+      class="border-r border-apple-border flex flex-col apple-glass fixed h-screen z-10 transition-all duration-300"
+      :class="isSidebarCollapsed ? 'w-24' : 'w-64'"
+    >
+      <div class="p-6 flex items-center" :class="isSidebarCollapsed ? 'justify-center' : 'gap-3'">
         <div class="w-10 h-10 bg-apple-blue rounded-apple flex items-center justify-center text-white">
           <FlaskConical :size="24" />
         </div>
-        <div>
+        <div v-if="!isSidebarCollapsed">
           <h1 class="font-bold text-lg tracking-tight">FreeWillase</h1>
           <p class="text-[10px] text-apple-secondary-text uppercase tracking-widest font-medium">Enzyme Platform</p>
         </div>
       </div>
 
       <div class="px-4 py-2">
+        <button
+          type="button"
+          class="mb-3 flex w-full items-center rounded-apple border border-apple-border bg-white/40 px-3 py-2 text-xs font-bold text-apple-secondary-text transition-colors hover:bg-black/5 hover:text-apple-text dark:bg-white/5 dark:hover:bg-white/10"
+          :class="isSidebarCollapsed ? 'justify-center' : 'justify-between'"
+          :title="isSidebarCollapsed ? '展开侧栏' : '收起侧栏'"
+          @click="toggleSidebar"
+        >
+          <span v-if="!isSidebarCollapsed">收起侧栏</span>
+          <PanelLeftOpen v-if="isSidebarCollapsed" :size="16" />
+          <PanelLeftClose v-else :size="16" />
+        </button>
+
         <div class="relative group">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-apple-secondary-text group-focus-within:text-apple-blue transition-colors" :size="14" />
+          <Search
+            class="absolute top-1/2 -translate-y-1/2 text-apple-secondary-text group-focus-within:text-apple-blue transition-colors"
+            :class="isSidebarCollapsed ? 'left-1/2 -translate-x-1/2' : 'left-3'"
+            :size="14"
+          />
           <input 
             type="text" 
             placeholder="快速搜索..." 
-            class="w-full bg-black/5 dark:bg-white/5 border-none rounded-apple py-2 pl-9 pr-4 text-xs focus:ring-1 focus:ring-apple-blue outline-none transition-all"
+            class="w-full bg-black/5 dark:bg-white/5 border-none rounded-apple py-2 text-xs focus:ring-1 focus:ring-apple-blue outline-none transition-all"
+            :class="isSidebarCollapsed ? 'px-0 text-transparent placeholder:text-transparent cursor-pointer' : 'pl-9 pr-4'"
+            :title="isSidebarCollapsed ? '快速搜索' : undefined"
           />
         </div>
       </div>
@@ -60,29 +94,40 @@ const currentItem = computed(() => navItems.find((item) => isRouteActive(item.to
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="flex items-center justify-between px-3 py-2.5 rounded-apple transition-all group"
-          :class="isRouteActive(item.to)
-            ? 'bg-apple-blue text-white shadow-lg shadow-apple-blue/20' 
-            : 'text-apple-secondary-text hover:bg-black/5 dark:hover:bg-white/5 hover:text-apple-text'"
+          class="flex items-center px-3 py-2.5 rounded-apple transition-all group"
+          :class="[
+            isSidebarCollapsed ? 'justify-center' : 'justify-between',
+            isRouteActive(item.to)
+              ? 'bg-apple-blue text-white shadow-lg shadow-apple-blue/20'
+              : 'text-apple-secondary-text hover:bg-black/5 dark:hover:bg-white/5 hover:text-apple-text'
+          ]"
+          :title="isSidebarCollapsed ? item.label : undefined"
         >
-          <div class="flex items-center gap-3">
+          <div class="flex items-center" :class="isSidebarCollapsed ? 'justify-center' : 'gap-3'">
             <component :is="item.icon" :size="18" />
-            <span class="text-sm font-medium">{{ item.label }}</span>
+            <span v-if="!isSidebarCollapsed" class="text-sm font-medium">{{ item.label }}</span>
           </div>
-          <ChevronRight v-if="isRouteActive(item.to)" :size="14" class="opacity-50" />
+          <ChevronRight v-if="!isSidebarCollapsed && isRouteActive(item.to)" :size="14" class="opacity-50" />
         </RouterLink>
       </nav>
 
       <div class="p-4 border-t border-apple-border">
-        <button class="flex items-center gap-3 w-full px-3 py-2 text-apple-secondary-text hover:text-apple-text transition-colors text-sm font-medium">
+        <button
+          class="flex w-full px-3 py-2 text-apple-secondary-text hover:text-apple-text transition-colors text-sm font-medium"
+          :class="isSidebarCollapsed ? 'justify-center' : 'items-center gap-3'"
+          :title="isSidebarCollapsed ? '系统设置' : undefined"
+        >
           <Settings :size="18" />
-          <span>系统设置</span>
+          <span v-if="!isSidebarCollapsed">系统设置</span>
         </button>
       </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 ml-64 min-h-screen flex flex-col">
+    <main
+      class="flex-1 min-h-screen flex flex-col transition-all duration-300"
+      :class="isSidebarCollapsed ? 'ml-24' : 'ml-64'"
+    >
       <!-- Header -->
       <header class="h-16 border-b border-apple-border apple-glass sticky top-0 z-20 px-8 flex items-center justify-between">
         <div class="flex items-center gap-2 text-sm">

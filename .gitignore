@@ -45,3 +45,6 @@ storage/
 
 # --- Docker ---
 .docker/
+
+# --- Runtime Logs ---
+logs/freewillase-backend.log
