@@ -15,6 +15,7 @@ import com.freewillase.backend.mapper.EnzymeCrossRefMapper;
 import com.freewillase.backend.mapper.EnzymeEntryMapper;
 import com.freewillase.backend.mapper.EnzymeSequenceMapper;
 import com.freewillase.backend.mapper.EnzymeStructureMapper;
+import com.freewillase.backend.mapper.LiteratureRelationMapper;
 import com.freewillase.backend.mapper.NcbiImportTaskItemMapper;
 import com.freewillase.backend.mapper.NcbiImportTaskMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -57,7 +58,7 @@ public class NcbiImportService {
     private final EnzymeStructureMapper enzymeStructureMapper;
     private final NcbiImportTaskMapper taskMapper;
     private final NcbiImportTaskItemMapper taskItemMapper;
-    private final com.freewillase.backend.mapper.LiteratureRelationMapper relationMapper;
+    private final LiteratureRelationMapper relationMapper;
 
     @Autowired
     @Lazy
@@ -72,7 +73,7 @@ public class NcbiImportService {
             EnzymeStructureMapper enzymeStructureMapper,
             NcbiImportTaskMapper taskMapper,
             NcbiImportTaskItemMapper taskItemMapper,
-            com.freewillase.backend.mapper.LiteratureRelationMapper relationMapper) {
+            LiteratureRelationMapper relationMapper) {
         this.ncbiEutilsClient = ncbiEutilsClient;
         this.uniProtClient = uniProtClient;
         this.enzymeCrossRefMapper = enzymeCrossRefMapper;
