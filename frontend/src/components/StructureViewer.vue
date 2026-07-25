@@ -48,6 +48,9 @@ const initViewer = async () => {
   await nextTick()
 
   try {
+    // #region debug-point B:init-viewer
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'B', location: 'StructureViewer.vue:initViewer:33', msg: '[DEBUG] init viewer requested', data: { pdbId: props.pdbId, url: props.url, sourceDb: props.sourceDb, width: parentRef.value?.clientWidth ?? null, height: parentRef.value?.clientHeight ?? null }, ts: Date.now() }) }).catch(() => {})
+    // #endregion
     const spec = DefaultPluginUISpec()
     spec.components = {
       ...spec.components,
@@ -80,10 +83,16 @@ const initViewer = async () => {
       render: renderReact18,
       spec
     })
+    // #region debug-point B:init-viewer-created
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'B', location: 'StructureViewer.vue:initViewer:58', msg: '[DEBUG] plugin created', data: { hasPlugin: Boolean(plugin), width: parentRef.value?.clientWidth ?? null, height: parentRef.value?.clientHeight ?? null }, ts: Date.now() }) }).catch(() => {})
+    // #endregion
     registerClickHandler()
 
     await reloadStructure()
   } catch (err) {
+    // #region debug-point B:init-viewer-error
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'B', location: 'StructureViewer.vue:initViewer:65', msg: '[DEBUG] init viewer failed', data: { error: err instanceof Error ? err.message : String(err) }, ts: Date.now() }) }).catch(() => {})
+    // #endregion
     console.error('Molstar init error:', err)
     hasError.value = true
     errorMessage.value = '3D 渲染引擎启动失败'
@@ -184,11 +193,17 @@ const loadStructure = async (id: string, sourceDb?: string) => {
 
   try {
     await clearViewer()
+    // #region debug-point C:load-structure-start
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:143', msg: '[DEBUG] load structure start', data: { id, sourceDb, normalizedSourceDb }, ts: Date.now() }) }).catch(() => {})
+    // #endregion
 
     if (normalizedSourceDb === 'PDB') {
       const pdbUrl = `https://files.rcsb.org/download/${id.toUpperCase()}.cif`
       console.info('[StructureViewer] loading PDB structure', { id, pdbUrl })
       await loaders.loadStructureFromUrl(plugin, pdbUrl, 'mmcif', false)
+      // #region debug-point C:load-structure-success-pdb
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:150', msg: '[DEBUG] load PDB success', data: { id, pdbUrl }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       requestViewerResize()
       return
     }
@@ -197,6 +212,9 @@ const loadStructure = async (id: string, sourceDb?: string) => {
       const alphaFoldUrl = `https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`
       console.info('[StructureViewer] loading AlphaFold structure', { id, alphaFoldUrl })
       await loaders.loadStructureFromUrl(plugin, alphaFoldUrl, 'pdb', false)
+      // #region debug-point C:load-structure-success-af
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:161', msg: '[DEBUG] load AlphaFold success', data: { id, alphaFoldUrl }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       requestViewerResize()
       return
     }
@@ -205,21 +223,36 @@ const loadStructure = async (id: string, sourceDb?: string) => {
       const pdbUrl = `https://files.rcsb.org/download/${id.toUpperCase()}.cif`
       console.info('[StructureViewer] trying PDB fallback', { id, pdbUrl })
       await loaders.loadStructureFromUrl(plugin, pdbUrl, 'mmcif', false)
+      // #region debug-point C:load-structure-success-fallback-pdb
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:171', msg: '[DEBUG] load fallback PDB success', data: { id, pdbUrl }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       requestViewerResize()
     } catch (pdbErr) {
+      // #region debug-point C:load-structure-fallback-pdb-error
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:175', msg: '[DEBUG] load fallback PDB failed', data: { id, error: pdbErr instanceof Error ? pdbErr.message : String(pdbErr) }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       console.warn(`PDB ${id} not found, trying AlphaFold...`, pdbErr)
       try {
         const alphaFoldUrl = `https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`
         console.info('[StructureViewer] trying AlphaFold fallback', { id, alphaFoldUrl })
         await loaders.loadStructureFromUrl(plugin, alphaFoldUrl, 'pdb', false)
+        // #region debug-point C:load-structure-success-fallback-af
+        fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:181', msg: '[DEBUG] load fallback AlphaFold success', data: { id, alphaFoldUrl }, ts: Date.now() }) }).catch(() => {})
+        // #endregion
         requestViewerResize()
       } catch (afErr) {
+        // #region debug-point C:load-structure-all-failed
+        fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:185', msg: '[DEBUG] all structure sources failed', data: { id, pdbError: pdbErr instanceof Error ? pdbErr.message : String(pdbErr), alphaFoldError: afErr instanceof Error ? afErr.message : String(afErr) }, ts: Date.now() }) }).catch(() => {})
+        // #endregion
         console.error('[StructureViewer] all structure sources failed', { id, pdbErr, afErr })
         hasError.value = true
         errorMessage.value = '未能加载该酶的 3D 结构'
       }
     }
   } catch (e) {
+    // #region debug-point C:load-structure-error
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'C', location: 'StructureViewer.vue:loadStructure:193', msg: '[DEBUG] structure loading error', data: { id, error: e instanceof Error ? e.message : String(e) }, ts: Date.now() }) }).catch(() => {})
+    // #endregion
     console.error('Structure loading error:', e)
     hasError.value = true
     errorMessage.value = '结构解析失败'
@@ -293,9 +326,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="relative w-full h-full rounded-apple-lg overflow-hidden border border-apple-border bg-white shadow-apple min-h-[400px]">
+  <div class="relative w-full h-[420px] md:h-[520px] rounded-apple-lg overflow-hidden border border-apple-border bg-white shadow-apple">
     <!-- Canvas Container -->
-    <div ref="parentRef" class="absolute inset-0 molstar-viewer-container"></div>
+    <div ref="parentRef" class="w-full h-full molstar-viewer-container"></div>
 
     <div
       v-if="pickMode && !isLoading && !hasError && (pdbId || url)"

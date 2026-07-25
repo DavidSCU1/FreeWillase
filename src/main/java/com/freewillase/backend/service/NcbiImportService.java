@@ -56,6 +56,9 @@ public class NcbiImportService {
     public static final String SOURCE_TYPE_MINIFOLD_PREDICTION = "MINIFOLD_PREDICTION";
     private static final Set<String> SUPPORTED_ANNOTATION_TYPES = Set.of("DOMAIN", "ACTIVE_SITE", "MUTATION");
     private static final String ANNOTATION_SOURCE_UNIPROT = "UNIPROT";
+    private static final int ANNOTATION_TITLE_MAX_LENGTH = 512;
+    private static final int ANNOTATION_MUTATION_LABEL_MAX_LENGTH = 255;
+    private static final int ANNOTATION_SOURCE_REF_MAX_LENGTH = 255;
 
     private final NcbiEutilsClient ncbiEutilsClient;
     private final UniProtClient uniProtClient;
@@ -497,11 +500,11 @@ public class NcbiImportService {
                 .startResidue(startResidue)
                 .endResidue(endResidue)
                 .chainLabel(trimToNull(request.getChainLabel()))
-                .mutationLabel(trimToNull(request.getMutationLabel()))
+                .mutationLabel(normalizeMutationLabel(annotationType, request.getMutationLabel()))
                 .colorHex(normalizeColorHex(request.getColorHex()))
                 .description(trimToNull(request.getDescription()))
                 .sourceDb(existing != null ? existing.getSourceDb() : null)
-                .sourceRef(existing != null ? existing.getSourceRef() : null)
+                .sourceRef(existing != null ? truncateToLength(existing.getSourceRef(), ANNOTATION_SOURCE_REF_MAX_LENGTH) : null)
                 .createdAt(existing != null ? existing.getCreatedAt() : now)
                 .updatedAt(now)
                 .build();
@@ -521,15 +524,15 @@ public class NcbiImportService {
         return EnzymeAnnotation.builder()
                 .enzymeId(enzymeId)
                 .annotationType(annotationType)
-                .title(title)
+                .title(buildAnnotationTitle(annotationType, title, startResidue, endResidue))
                 .startResidue(startResidue)
                 .endResidue(endResidue)
                 .chainLabel(trimToNull(chainLabel))
-                .mutationLabel(trimToNull(mutationLabel))
+                .mutationLabel(normalizeMutationLabel(annotationType, mutationLabel))
                 .colorHex(defaultAnnotationColor(annotationType))
                 .description(trimToNull(description))
                 .sourceDb(trimToNull(sourceDb))
-                .sourceRef(trimToNull(sourceRef))
+                .sourceRef(truncateToLength(sourceRef, ANNOTATION_SOURCE_REF_MAX_LENGTH))
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -571,16 +574,34 @@ public class NcbiImportService {
 
     private String buildAnnotationTitle(String annotationType, String title, Integer startResidue, Integer endResidue) {
         String normalizedTitle = trimToNull(title);
-        if (normalizedTitle != null) {
-            return normalizedTitle;
+        if (normalizedTitle == null) {
+            if ("ACTIVE_SITE".equals(annotationType)) {
+                normalizedTitle = "活性位点 " + startResidue;
+            } else if ("MUTATION".equals(annotationType)) {
+                normalizedTitle = "突变位点 " + startResidue;
+            } else {
+                normalizedTitle = "结构域 " + startResidue + "-" + endResidue;
+            }
         }
-        if ("ACTIVE_SITE".equals(annotationType)) {
-            return "活性位点 " + startResidue;
+        return truncateToLength(normalizedTitle, ANNOTATION_TITLE_MAX_LENGTH);
+    }
+
+    private String normalizeMutationLabel(String annotationType, String mutationLabel) {
+        if (!"MUTATION".equals(annotationType)) {
+            return truncateToLength(mutationLabel, ANNOTATION_MUTATION_LABEL_MAX_LENGTH);
         }
-        if ("MUTATION".equals(annotationType)) {
-            return "突变位点 " + startResidue;
+        return truncateToLength(mutationLabel, ANNOTATION_MUTATION_LABEL_MAX_LENGTH);
+    }
+
+    private String truncateToLength(String value, int maxLength) {
+        String normalized = trimToNull(value);
+        if (normalized == null || normalized.length() <= maxLength) {
+            return normalized;
         }
-        return "结构域 " + startResidue + "-" + endResidue;
+        if (maxLength <= 3) {
+            return normalized.substring(0, maxLength);
+        }
+        return normalized.substring(0, maxLength - 3).trim() + "...";
     }
 
     private String normalizeColorHex(String colorHex) {

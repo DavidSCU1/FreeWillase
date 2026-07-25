@@ -1,0 +1,3 @@
+ALTER TABLE enzyme_annotation
+  MODIFY COLUMN title VARCHAR(512) NOT NULL,
+  MODIFY COLUMN mutation_label VARCHAR(255) NULL;
