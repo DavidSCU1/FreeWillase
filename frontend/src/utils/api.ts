@@ -13,11 +13,6 @@ interface MatchRequest {
   enzymeIds?: number[]
 }
 
-interface RnaFoldRequest {
-  name: string
-  sequence: string
-}
-
 interface SaveMiniFoldEnzymeRequest {
   name: string
   sequence: string
@@ -289,13 +284,6 @@ export function getDashboardStats() {
     literatureCoverage: string
     systemStatus: string
   }>('/api/dashboard/stats')
-}
-
-export function predictRnaFold(payload: RnaFoldRequest) {
-  return request<any>('/api/prediction/rnafold', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
 }
 
 export function predictTrRosettaRna(payload: { name: string, sequence: string, email?: string }) {

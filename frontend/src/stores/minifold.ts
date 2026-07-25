@@ -25,6 +25,7 @@ export type MiniFoldTaskRecord = {
 }
 
 type StoredMiniFoldSettings = {
+  moleculeType?: 'protein' | 'rna'
   sequence?: string
   envText?: string
   targetChains?: number | null
@@ -51,6 +52,7 @@ function safeParse<T>(value: string | null): T | null {
 }
 
 export const useMiniFoldStore = defineStore('minifold', () => {
+  const moleculeType = ref<'protein' | 'RNA'>('protein')
   const sequence = ref('')
   const envText = ref('')
   const targetChains = ref<number | null>(null)
@@ -73,6 +75,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
   function loadSettings() {
     const saved = safeParse<StoredMiniFoldSettings>(localStorage.getItem(STORAGE_KEY))
     if (!saved) return
+    if (saved.moleculeType === 'protein' || saved.moleculeType === 'RNA') moleculeType.value = saved.moleculeType
     if (typeof saved.sequence === 'string') sequence.value = saved.sequence
     if (typeof saved.envText === 'string') envText.value = saved.envText
     if (saved.targetChains === null || typeof saved.targetChains === 'number') targetChains.value = saved.targetChains
@@ -104,6 +107,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
 
   function persistSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      moleculeType: moleculeType.value,
       sequence: sequence.value,
       envText: envText.value,
       targetChains: targetChains.value,
@@ -202,7 +206,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
 
     let normalizedSequence = ''
     try {
-      normalizedSequence = normalizeSequenceInput(sequence.value, 'protein')
+      normalizedSequence = normalizeSequenceInput(sequence.value, moleculeType.value)
     } catch (e: any) {
       error.value = e?.message || '序列格式错误'
       status.value = 'error'
@@ -217,6 +221,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
 
     try {
       const payload = {
+        moleculeType: moleculeType.value,
         sequence: normalizedSequence,
         envText: envText.value.trim(),
         targetChains: targetChains.value ?? undefined,
@@ -331,7 +336,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
   loadRuntimeState()
   loadTaskHistory()
 
-  watch([sequence, envText, targetChains, useAcceleration, backend, condaEnvName], () => {
+  watch([moleculeType, sequence, envText, targetChains, useAcceleration, backend, condaEnvName], () => {
     persistSettings()
   }, { deep: true })
 
@@ -352,6 +357,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
   })
 
   return {
+    moleculeType,
     sequence,
     envText,
     targetChains,

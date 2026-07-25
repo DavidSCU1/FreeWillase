@@ -32,7 +32,7 @@ function makeTaskId() {
 }
 
 function isSupportedProvider(value: unknown): value is PredictionProvider {
-  return value === 'nvidia' || value === 'rnafold' || value === 'minifold' || value === 'trrosettarna'
+  return value === 'nvidia' || value === 'minifold' || value === 'trrosettarna'
 }
 
 export const usePredictionStore = defineStore('prediction', () => {
@@ -54,7 +54,7 @@ export const usePredictionStore = defineStore('prediction', () => {
   const error = ref<string | null>(null)
   
   const viewerUrl = ref<string | null>(null)
-  const viewerFormat = ref<'pdb' | 'mmcif' | 'dot-bracket'>('pdb')
+  const viewerFormat = ref<'pdb' | 'mmcif'>('pdb')
   const lastStructureText = ref<string | null>(null)
 
   const supportedModels = computed(() => getSupportedModels(provider.value))
@@ -99,14 +99,8 @@ export const usePredictionStore = defineStore('prediction', () => {
     viewerUrl.value = null
   }
 
-  function setViewer(structure: string, format: 'pdb' | 'mmcif' | 'dot-bracket') {
+  function setViewer(structure: string, format: 'pdb' | 'mmcif') {
     revokeViewerUrl()
-    if (format === 'dot-bracket') {
-      viewerUrl.value = null
-      viewerFormat.value = format
-      lastStructureText.value = structure
-      return
-    }
     const fileName = format === 'pdb' ? 'prediction.pdb' : 'prediction.cif'
     const blob = new Blob([structure], { type: 'text/plain' })
     viewerUrl.value = URL.createObjectURL(blob)
@@ -126,10 +120,10 @@ export const usePredictionStore = defineStore('prediction', () => {
     } else if (!models.includes(model.value)) {
       model.value = models[0]
     }
-    if (submitMode.value !== 'single' && (provider.value === 'nvidia' || provider.value === 'rnafold' || provider.value === 'trrosettarna')) {
+    if (submitMode.value !== 'single' && (provider.value === 'nvidia' || provider.value === 'trrosettarna')) {
       submitMode.value = 'single'
     }
-    if (provider.value === 'rnafold' || provider.value === 'trrosettarna') {
+    if (provider.value === 'trrosettarna') {
       moleculeType.value = 'RNA'
       submitMode.value = 'single'
       baseUrl.value = ''
@@ -138,7 +132,7 @@ export const usePredictionStore = defineStore('prediction', () => {
 
   // Force molecule type for RNA providers
   watch(provider, (newProvider) => {
-    if (newProvider === 'rnafold' || newProvider === 'trrosettarna') {
+    if (newProvider === 'trrosettarna') {
       moleculeType.value = 'RNA'
     }
   }, { immediate: true })
@@ -147,7 +141,7 @@ export const usePredictionStore = defineStore('prediction', () => {
     error.value = null
     
     // Extra safety: ensure molecule type is correct before processing
-    if (provider.value === 'rnafold' || provider.value === 'trrosettarna') {
+    if (provider.value === 'trrosettarna') {
       moleculeType.value = 'RNA'
     }
 
@@ -176,13 +170,13 @@ export const usePredictionStore = defineStore('prediction', () => {
       return
     }
 
-    if (provider.value === 'rnafold' || provider.value === 'trrosettarna') {
+    if (provider.value === 'trrosettarna') {
       if (moleculeType.value !== 'RNA') {
-        error.value = `${provider.value === 'rnafold' ? 'RNAfold' : 'trRosettaRNA'} 仅支持 RNA 序列预测`
+        error.value = 'trRosettaRNA 仅支持 RNA 序列预测'
         return
       }
       if (submitMode.value !== 'single') {
-        error.value = `${provider.value === 'rnafold' ? 'RNAfold' : 'trRosettaRNA'} 当前仅支持单条提交`
+        error.value = 'trRosettaRNA 当前仅支持单条提交'
         return
       }
       if (provider.value === 'trrosettarna' && preparedSequence.length > 400) {

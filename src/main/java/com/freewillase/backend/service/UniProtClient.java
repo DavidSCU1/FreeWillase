@@ -19,9 +19,15 @@ import java.util.Set;
 @Slf4j
 @Component
 public class UniProtClient {
-    private static final Set<String> DOMAIN_FEATURE_TYPES = Set.of("DOMAIN", "REGION", "REPEAT", "ZN_FING");
-    private static final Set<String> ACTIVE_SITE_FEATURE_TYPES = Set.of("ACT_SITE", "BINDING", "SITE");
-    private static final Set<String> MUTATION_FEATURE_TYPES = Set.of("MUTAGEN", "VARIANT");
+    private static final Set<String> DOMAIN_FEATURE_TYPES = Set.of(
+            "DOMAIN", "REGION", "REPEAT", "ZN_FING", "ZINC FINGER"
+    );
+    private static final Set<String> ACTIVE_SITE_FEATURE_TYPES = Set.of(
+            "ACT_SITE", "ACTIVE SITE", "BINDING", "BINDING SITE", "SITE"
+    );
+    private static final Set<String> MUTATION_FEATURE_TYPES = Set.of(
+            "MUTAGEN", "MUTAGENESIS", "VARIANT", "NATURAL VARIANT"
+    );
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;

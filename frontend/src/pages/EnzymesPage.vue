@@ -511,21 +511,36 @@ watch(
 watch(
   () => [selectedEnzyme.value?.id, annotationsLoading.value, annotations.value.length, isPredictedLibrary.value] as const,
   async ([enzymeId, loading, annotationCount, predicted]) => {
+    // #region debug-point D:auto-import-gate
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'D', location: 'EnzymesPage.vue:autoImportWatch:514', msg: '[DEBUG] auto import watch evaluated', data: { enzymeId, loading, annotationCount, predicted, hasAttempted: enzymeId ? attemptedAutoImportAnnotationIds.has(enzymeId) : false, uniprotAccession: selectedEnzyme.value?.uniprotAccession || null, pdbId: selectedEnzyme.value?.pdbId || null }, ts: Date.now() }) }).catch(() => {})
+    // #endregion
     if (!enzymeId || loading || predicted || annotationCount > 0 || attemptedAutoImportAnnotationIds.has(enzymeId)) {
       return
     }
     const enzyme = selectedEnzyme.value
-    if (!enzyme?.uniprotAccession) {
+    if (!enzyme?.uniprotAccession && !enzyme?.pdbId) {
+      // #region debug-point D:auto-import-skipped
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'D', location: 'EnzymesPage.vue:autoImportWatch:520', msg: '[DEBUG] auto import skipped for missing uniprot accession', data: { enzymeId, pdbId: enzyme?.pdbId || null, structureId: enzyme?.structureId || null }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       attemptedAutoImportAnnotationIds.add(enzymeId)
       return
     }
     attemptedAutoImportAnnotationIds.add(enzymeId)
     try {
+      // #region debug-point E:auto-import-start
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:526', msg: '[DEBUG] auto import started', data: { enzymeId, uniprotAccession: enzyme.uniprotAccession, pdbId: enzyme.pdbId || null }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       const imported = await importFromUniProt(enzymeId)
+      // #region debug-point E:auto-import-result
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:528', msg: '[DEBUG] auto import finished', data: { enzymeId, importedCount: imported.length, sourceDbs: imported.map((item) => item.sourceDb || null) }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       if (imported.length) {
         annotationNotice.value = `已自动从 UniProt / PDB 补充 ${imported.length} 条初始注释`
       }
     } catch (error) {
+      // #region debug-point E:auto-import-error
+      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:533', msg: '[DEBUG] auto import failed', data: { enzymeId, error: error instanceof Error ? error.message : String(error) }, ts: Date.now() }) }).catch(() => {})
+      // #endregion
       console.error('自动补充 UniProt / PDB 注释失败', error)
     }
   },
@@ -572,6 +587,16 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => selectedEnzyme.value,
+  (enzyme) => {
+    // #region debug-point A:selected-enzyme
+    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'A', location: 'EnzymesPage.vue:selectedEnzymeWatch:560', msg: '[DEBUG] selected enzyme payload prepared for viewer', data: enzyme ? { enzymeId: enzyme.id, accession: enzyme.accession, structureId: enzyme.structureId, structureSourceDb: enzyme.structureSourceDb, structureUrl: enzyme.structureUrl, pdbId: enzyme.pdbId, uniprotAccession: enzyme.uniprotAccession, selectedViewerStructureId: selectedViewerStructureId.value, selectedStructureUrl: selectedStructureUrl.value, selectedStructureSource: selectedStructureSource.value } : null, ts: Date.now() }) }).catch(() => {})
+    // #endregion
+  },
+  { immediate: true, deep: true },
 )
 
 onMounted(async () => {

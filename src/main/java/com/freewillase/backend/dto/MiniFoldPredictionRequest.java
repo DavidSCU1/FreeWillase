@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MiniFoldPredictionRequest {
+    private String moleculeType;
     private String sequence;
     private String envText;
     private Integer targetChains;

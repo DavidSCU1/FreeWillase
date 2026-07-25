@@ -22,15 +22,6 @@ const workbenches = [
     accent: 'from-apple-blue/10 to-cyan-500/10',
   },
   {
-    key: 'rnafold',
-    title: 'RNAfold',
-    description: '单条 RNA 二级结构预测，聚焦 dot-bracket、能量信息和 RNA 专属输入。',
-    route: '/prediction/rnafold',
-    badge: 'RNA Secondary',
-    points: ['固定单条 RNA 输入', '无需额外 API Key', '返回 dot-bracket 与 MFE'],
-    accent: 'from-emerald-500/10 to-teal-500/10',
-  },
-  {
     key: 'trrosettarna',
     title: 'trRosettaRNA',
     description: 'RNA 三维结构预测，通过网页接口模拟实现长序列的深度学习折叠。',
@@ -67,18 +58,18 @@ const workbenches = [
           </div>
 
           <p class="max-w-2xl text-sm leading-relaxed text-apple-secondary-text">
-            现在预测模块只保留 4 个独立页面：`NVIDIA ESMFold`、`RNAfold`、`trRosettaRNA` 和 `MiniFold`。每个页面都只 handle 自己的输入规则、执行流程和结果展示。
+            现在预测模块保留 3 个独立页面：`NVIDIA ESMFold`、`trRosettaRNA` 和 `MiniFold`。每个页面都只处理自己的输入规则、执行流程和结果展示。
           </p>
         </div>
 
-        <div class="grid grid-cols-4 gap-3 lg:min-w-[480px]">
+        <div class="grid grid-cols-3 gap-3 lg:min-w-[360px]">
           <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3">
             <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">工作台数</p>
-            <p class="mt-1 text-sm font-semibold text-apple-text">4</p>
+            <p class="mt-1 text-sm font-semibold text-apple-text">3</p>
           </div>
           <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3">
             <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">云端</p>
-            <p class="mt-1 text-sm font-semibold text-apple-text">3</p>
+            <p class="mt-1 text-sm font-semibold text-apple-text">2</p>
           </div>
           <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3">
             <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">本地</p>
@@ -101,7 +92,7 @@ const workbenches = [
             <div class="space-y-3">
               <div class="w-10 h-10 rounded-apple flex items-center justify-center" :class="`bg-gradient-to-br ${bench.accent}`">
                 <Cpu v-if="bench.key === 'minifold'" class="text-purple-500" :size="18" />
-                <Dna v-else-if="bench.key === 'rnafold'" class="text-emerald-500" :size="18" />
+                <Dna v-else-if="bench.key === 'trrosettarna'" class="text-orange-500" :size="18" />
                 <Microscope v-else class="text-apple-blue" :size="18" />
               </div>
               <div>

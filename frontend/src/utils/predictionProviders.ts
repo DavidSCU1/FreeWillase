@@ -1,5 +1,5 @@
 import type { MoleculeType, PredictionConfig, PredictionRequest, PredictionResult } from '@/types'
-import { predictRnaFold, predictMiniFold, predictTrRosettaRna } from '@/utils/api'
+import { predictMiniFold, predictTrRosettaRna } from '@/utils/api'
 
 export interface ParsedSequenceRecord {
   name: string
@@ -8,13 +8,11 @@ export interface ParsedSequenceRecord {
 
 const DEFAULT_BASE_URL: Record<Exclude<PredictionConfig['provider'], 'minifold'>, string> = {
   nvidia: 'https://health.api.nvidia.com',
-  rnafold: '/api/prediction',
   trrosettarna: '/api/prediction',
 }
 
 const NVIDIA_MODELS = ['esmfold'] as const
 const MINIFOLD_MODELS = ['MiniFold-v1 (Ark Hybrid)'] as const
-const RNAFOLD_MODELS = ['rnafold'] as const
 const TRROSETTARNA_MODELS = ['trRosettaRNA'] as const
 
 const SEQUENCE_RULES = {
@@ -38,32 +36,31 @@ const SEQUENCE_RULES = {
 export function getSupportedModels(provider: PredictionConfig['provider']): string[] {
   if (provider === 'nvidia') return [...NVIDIA_MODELS]
   if (provider === 'minifold') return [...MINIFOLD_MODELS]
-  if (provider === 'rnafold') return [...RNAFOLD_MODELS]
   if (provider === 'trrosettarna') return [...TRROSETTARNA_MODELS]
   return []
 }
 
 export function getSupportedMoleculeTypes(provider: PredictionConfig['provider']): MoleculeType[] {
   if (provider === 'nvidia') return ['protein']
-  if (provider === 'rnafold' || provider === 'trrosettarna') return ['RNA']
+  if (provider === 'trrosettarna') return ['RNA']
   return ['protein']
 }
 
 function getDevProxyBaseUrl(provider: Exclude<PredictionConfig['provider'], 'minifold'>) {
-  if (provider === 'rnafold' || provider === 'trrosettarna') return '/api/prediction'
+  if (provider === 'trrosettarna') return '/api/prediction'
   return `/proxy/${provider}`
 }
 
 function pickBaseUrl(config: PredictionConfig): string {
-  if (config.provider === 'minifold' || config.provider === 'rnafold' || config.provider === 'trrosettarna') return '/api/prediction'
+  if (config.provider === 'minifold' || config.provider === 'trrosettarna') return '/api/prediction'
   const baseUrl = (config.baseUrl || '').trim()
   if (baseUrl) return baseUrl
   if (import.meta.env.DEV) return getDevProxyBaseUrl(config.provider)
-  return DEFAULT_BASE_URL[config.provider as Exclude<PredictionConfig['provider'], 'minifold' | 'rnafold'>]
+  return DEFAULT_BASE_URL[config.provider as Exclude<PredictionConfig['provider'], 'minifold'>]
 }
 
 function assertApiKey(config: PredictionConfig) {
-  if (config.provider === 'rnafold' || config.provider === 'trrosettarna') return
+  if (config.provider === 'trrosettarna') return
   if (!config.apiKey?.trim()) throw new Error('请先填写 API Key')
 }
 
@@ -183,8 +180,7 @@ function looksLikeJson(text: string) {
 
 function getProviderLabel(provider: Exclude<PredictionConfig['provider'], 'minifold'>) {
   if (provider === 'nvidia') return 'NVIDIA ESMFold'
-  if (provider === 'trrosettarna') return 'trRosettaRNA'
-  return 'RNAfold'
+  return 'trRosettaRNA'
 }
 
 function formatHttpError(
@@ -303,17 +299,6 @@ export async function predictStructure(config: PredictionConfig, request: Predic
       format: 'pdb',
       structure: text,
     }
-  }
-
-  if (config.provider === 'rnafold') {
-    if (request.type !== 'RNA') throw new Error('RNAfold 仅支持 RNA')
-    if (normalizedRecords.length !== 1) throw new Error('RNAfold 当前仅支持单条 RNA 序列')
-    const body = await predictRnaFold({
-      name: request.name,
-      sequence: normalizedSequence || '',
-    }) as PredictionResult
-    if (!body?.structure?.trim()) throw new Error('RNAfold 返回结构为空')
-    return body
   }
 
   if (config.provider === 'trrosettarna') {
