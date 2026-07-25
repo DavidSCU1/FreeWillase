@@ -7,9 +7,19 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.StringReader;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -35,6 +45,32 @@ public class NcbiEutilsClient {
 
     public LookupResult fetchNucleotideByAccession(String accession, String email, String apiKey) {
         return fetchByAccession("nucleotide", accession, email, apiKey);
+    }
+
+    public List<NucleotideFeatureAnnotation> fetchNucleotideFeatureAnnotations(String accession, String email, String apiKey) {
+        String uid = searchUid("nucleotide", accession, email, apiKey);
+        if (uid == null || uid.isBlank()) {
+            throw new IllegalArgumentException("NCBI 未找到 accession: " + accession);
+        }
+
+        UriComponentsBuilder efetchBuilder = UriComponentsBuilder.fromHttpUrl(baseUrl + "/efetch.fcgi")
+                .queryParam("db", "nucleotide")
+                .queryParam("id", uid)
+                .queryParam("rettype", "gbc")
+                .queryParam("retmode", "xml")
+                .queryParam("tool", toolName);
+
+        if (email != null && !email.isBlank()) efetchBuilder.queryParam("email", email);
+        if (apiKey != null && !apiKey.isBlank()) efetchBuilder.queryParam("api_key", apiKey);
+
+        String xmlText = restTemplate.getForObject(
+                efetchBuilder.encode().build().toUri(),
+                String.class
+        );
+        if (xmlText == null || xmlText.isBlank()) {
+            return List.of();
+        }
+        return parseNucleotideFeatureAnnotations(accession, xmlText);
     }
 
     private LookupResult fetchByAccession(String db, String accession, String email, String apiKey) {
@@ -247,6 +283,316 @@ public class NcbiEutilsClient {
         return builder.toString();
     }
 
+    private List<NucleotideFeatureAnnotation> parseNucleotideFeatureAnnotations(String accession, String xmlText) {
+        try {
+            String sanitizedXml = xmlText.replaceFirst("(?s)<!DOCTYPE[^>]*>", "");
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            factory.setNamespaceAware(false);
+
+            Document document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(sanitizedXml)));
+            NodeList seqNodes = document.getElementsByTagName("INSDSeq");
+            if (seqNodes.getLength() == 0) {
+                return List.of();
+            }
+
+            Element seqElement = (Element) seqNodes.item(0);
+            String definition = childText(seqElement, "INSDSeq_definition");
+            String comment = childText(seqElement, "INSDSeq_comment");
+            String taxonomy = childText(seqElement, "INSDSeq_taxonomy");
+            String organism = childText(seqElement, "INSDSeq_organism");
+            int sequenceLength = parseInteger(childText(seqElement, "INSDSeq_length"));
+
+            List<NucleotideFeatureAnnotation> annotations = new ArrayList<>();
+            NodeList featureNodes = seqElement.getElementsByTagName("INSDFeature");
+            for (int i = 0; i < featureNodes.getLength(); i++) {
+                Element featureElement = (Element) featureNodes.item(i);
+                String featureKey = childText(featureElement, "INSDFeature_key");
+                LocationRange range = parseFeatureRange(featureElement);
+                if (featureKey == null || range == null || shouldSkipFeature(featureKey, range, sequenceLength)) {
+                    continue;
+                }
+
+                Map<String, String> qualifiers = parseFeatureQualifiers(featureElement);
+                NucleotideFeatureAnnotation annotation = buildNucleotideFeatureAnnotation(
+                        accession,
+                        featureKey,
+                        range,
+                        qualifiers
+                );
+                if (annotation != null) {
+                    annotations.add(annotation);
+                }
+            }
+
+            if (annotations.isEmpty()) {
+                NucleotideFeatureAnnotation inferred = buildFallbackRibozymeAnnotation(
+                        accession,
+                        definition,
+                        comment,
+                        taxonomy,
+                        organism,
+                        sequenceLength
+                );
+                if (inferred != null) {
+                    annotations.add(inferred);
+                }
+            }
+            return annotations;
+        } catch (Exception ex) {
+            log.warn("Failed to parse nucleotide feature annotations for {}", accession, ex);
+            return List.of();
+        }
+    }
+
+    private NucleotideFeatureAnnotation buildNucleotideFeatureAnnotation(String accession,
+                                                                        String featureKey,
+                                                                        LocationRange range,
+                                                                        Map<String, String> qualifiers) {
+        String combinedText = StreamText.join(featureKey, qualifiers.values()).toLowerCase(Locale.ROOT);
+        String annotationType = mapNucleotideFeatureType(featureKey, combinedText);
+        if (annotationType == null) {
+            return null;
+        }
+
+        int endResidue = "MUTATION".equals(annotationType) ? range.start() : range.end();
+        String title = buildNucleotideFeatureTitle(annotationType, featureKey, range, qualifiers, combinedText);
+        String description = buildNucleotideFeatureDescription(featureKey, qualifiers);
+
+        return NucleotideFeatureAnnotation.builder()
+                .annotationType(annotationType)
+                .title(title)
+                .startResidue(range.start())
+                .endResidue(endResidue)
+                .description(description)
+                .sourceDb("NCBI_NUCLEOTIDE")
+                .sourceRef(accession + ":" + featureKey + ":" + range.start() + "-" + endResidue)
+                .build();
+    }
+
+    private NucleotideFeatureAnnotation buildFallbackRibozymeAnnotation(String accession,
+                                                                        String definition,
+                                                                        String comment,
+                                                                        String taxonomy,
+                                                                        String organism,
+                                                                        int sequenceLength) {
+        if (sequenceLength <= 0) {
+            return null;
+        }
+
+        String combinedText = StreamText.join(definition, comment, taxonomy, organism).toLowerCase(Locale.ROOT);
+        String title = null;
+        String description = null;
+
+        if (combinedText.contains("hammerhead")) {
+            title = "Hammerhead ribozyme 候选区域（全长）";
+            description = "GenBank feature table 未提供可直接切分的区间，已根据条目标题或注释中的 hammerhead 线索回填全长候选区域。";
+        } else if (combinedText.contains("ribozyme")
+                || combinedText.contains("self-cleavage")
+                || combinedText.contains("self-cleaving")
+                || combinedText.contains("catalytic rna")) {
+            title = "Ribozyme 候选区域（全长）";
+            description = "GenBank feature table 未提供可直接切分的区间，已根据条目标题或注释中的核酶线索回填全长候选区域。";
+        } else if (combinedText.contains("avsunviroidae")
+                || combinedText.contains("avsunviroid")
+                || combinedText.contains("pelamoviroid")) {
+            title = "Avsunviroidae 核酶相关区域（全长候选）";
+            description = "当前记录缺少细分 feature，已根据 Avsunviroidae / Pelamoviroid 分类信息回填全长核酶相关候选区域。";
+        }
+
+        if (title == null) {
+            return null;
+        }
+
+        return NucleotideFeatureAnnotation.builder()
+                .annotationType("DOMAIN")
+                .title(title)
+                .startResidue(1)
+                .endResidue(sequenceLength)
+                .description(description)
+                .sourceDb("NCBI_NUCLEOTIDE")
+                .sourceRef(accession + ":inferred:1-" + sequenceLength)
+                .build();
+    }
+
+    private String mapNucleotideFeatureType(String featureKey, String combinedText) {
+        String normalizedKey = featureKey == null ? "" : featureKey.toLowerCase(Locale.ROOT);
+        if (normalizedKey.equals("variation")
+                || normalizedKey.equals("conflict")
+                || normalizedKey.equals("unsure")
+                || combinedText.contains("mutation")
+                || combinedText.contains("variant")
+                || combinedText.contains("substitution")
+                || combinedText.contains("deletion")
+                || combinedText.contains("insertion")) {
+            return "MUTATION";
+        }
+
+        if (normalizedKey.equals("misc_binding")
+                || normalizedKey.equals("protein_bind")
+                || normalizedKey.equals("modified_base")
+                || combinedText.contains("active site")
+                || combinedText.contains("catalytic")
+                || combinedText.contains("cleavage site")
+                || combinedText.contains("self-cleavage")
+                || combinedText.contains("binding site")) {
+            return "ACTIVE_SITE";
+        }
+
+        if (normalizedKey.equals("stem_loop")
+                || normalizedKey.equals("regulatory")
+                || normalizedKey.equals("repeat_region")
+                || normalizedKey.equals("misc_feature")
+                || normalizedKey.equals("precrna")
+                || normalizedKey.equals("precursor_rna")
+                || normalizedKey.equals("ncrna")
+                || normalizedKey.equals("ncrna_class")
+                || normalizedKey.equals("rrna")
+                || combinedText.contains("hammerhead")
+                || combinedText.contains("ribozyme")
+                || combinedText.contains("motif")
+                || combinedText.contains("domain")
+                || combinedText.contains("stem-loop")
+                || combinedText.contains("junction")
+                || combinedText.contains("loop")) {
+            return "DOMAIN";
+        }
+        return null;
+    }
+
+    private String buildNucleotideFeatureTitle(String annotationType,
+                                               String featureKey,
+                                               LocationRange range,
+                                               Map<String, String> qualifiers,
+                                               String combinedText) {
+        String candidate = firstNonBlank(
+                qualifiers.get("standard_name"),
+                qualifiers.get("label"),
+                qualifiers.get("product"),
+                qualifiers.get("gene"),
+                qualifiers.get("ncRNA_class"),
+                qualifiers.get("rpt_family"),
+                qualifiers.get("bound_moiety"),
+                qualifiers.get("note"),
+                qualifiers.get("function")
+        );
+        if (candidate != null) {
+            return candidate;
+        }
+        if ("ACTIVE_SITE".equals(annotationType)) {
+            if (combinedText.contains("hammerhead") || combinedText.contains("cleavage")) {
+                return "RNA 裂解相关位点 " + range.start();
+            }
+            return "RNA 关键位点 " + range.start();
+        }
+        if ("MUTATION".equals(annotationType)) {
+            return "RNA 变异位点 " + range.start();
+        }
+        String displayKey = featureKey == null ? "RNA 功能区" : featureKey.replace('_', ' ');
+        return displayKey + " " + range.start() + "-" + range.end();
+    }
+
+    private String buildNucleotideFeatureDescription(String featureKey, Map<String, String> qualifiers) {
+        List<String> parts = new ArrayList<>();
+        if (featureKey != null && !featureKey.isBlank()) {
+            parts.add("Feature: " + featureKey);
+        }
+        qualifiers.forEach((key, value) -> {
+            if (value != null && !value.isBlank()) {
+                parts.add(key + ": " + value);
+            }
+        });
+        String description = parts.stream().collect(Collectors.joining(" | "));
+        return description.isBlank() ? null : description;
+    }
+
+    private boolean shouldSkipFeature(String featureKey, LocationRange range, int sequenceLength) {
+        String normalizedKey = featureKey == null ? "" : featureKey.toLowerCase(Locale.ROOT);
+        if ("source".equals(normalizedKey)) {
+            return true;
+        }
+        return range.start() <= 0
+                || range.end() < range.start()
+                || (sequenceLength > 0 && range.start() == 1 && range.end() == sequenceLength && !"misc_feature".equals(normalizedKey));
+    }
+
+    private LocationRange parseFeatureRange(Element featureElement) {
+        NodeList intervalNodes = featureElement.getElementsByTagName("INSDInterval");
+        Integer min = null;
+        Integer max = null;
+        for (int i = 0; i < intervalNodes.getLength(); i++) {
+            Element interval = (Element) intervalNodes.item(i);
+            Integer from = parseInteger(firstNonBlank(
+                    childText(interval, "INSDInterval_from"),
+                    childText(interval, "INSDInterval_point")
+            ));
+            Integer to = parseInteger(firstNonBlank(
+                    childText(interval, "INSDInterval_to"),
+                    childText(interval, "INSDInterval_point")
+            ));
+            if (from == null || to == null) {
+                continue;
+            }
+            int start = Math.min(from, to);
+            int end = Math.max(from, to);
+            min = min == null ? start : Math.min(min, start);
+            max = max == null ? end : Math.max(max, end);
+        }
+        if (min == null || max == null) {
+            return null;
+        }
+        return new LocationRange(min, max);
+    }
+
+    private Map<String, String> parseFeatureQualifiers(Element featureElement) {
+        java.util.LinkedHashMap<String, String> qualifiers = new java.util.LinkedHashMap<>();
+        NodeList qualifierNodes = featureElement.getElementsByTagName("INSDQualifier");
+        for (int i = 0; i < qualifierNodes.getLength(); i++) {
+            Element qualifier = (Element) qualifierNodes.item(i);
+            String name = childText(qualifier, "INSDQualifier_name");
+            String value = childText(qualifier, "INSDQualifier_value");
+            if (name == null || value == null || value.isBlank()) {
+                continue;
+            }
+            qualifiers.merge(name, value, (left, right) -> left.contains(right) ? left : left + "; " + right);
+        }
+        return qualifiers;
+    }
+
+    private String childText(Element parent, String tagName) {
+        if (parent == null) {
+            return null;
+        }
+        NodeList nodeList = parent.getElementsByTagName(tagName);
+        for (int i = 0; i < nodeList.getLength(); i++) {
+            Node node = nodeList.item(i);
+            if (node != null && node.getParentNode() == parent) {
+                String text = node.getTextContent();
+                return text == null || text.isBlank() ? null : text.trim();
+            }
+        }
+        return null;
+    }
+
+    private Integer parseInteger(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String firstNonBlank(String... candidates) {
+        for (String candidate : candidates) {
+            if (candidate != null && !candidate.isBlank()) {
+                return candidate.trim();
+            }
+        }
+        return null;
+    }
+
     private String readString(Map<String, Object> node, String field, String fallback) {
         if (node == null) {
             return fallback;
@@ -308,5 +654,48 @@ public class NcbiEutilsClient {
         String pmcId;
         String xmlContent;
         String sourceUrl;
+    }
+
+    @lombok.Value
+    @Builder
+    public static class NucleotideFeatureAnnotation {
+        String annotationType;
+        String title;
+        Integer startResidue;
+        Integer endResidue;
+        String description;
+        String sourceDb;
+        String sourceRef;
+    }
+
+    private record LocationRange(int start, int end) {
+    }
+
+    private static final class StreamText {
+        private StreamText() {
+        }
+
+        private static String join(String first, java.util.Collection<String> rest) {
+            List<String> values = new ArrayList<>();
+            if (first != null && !first.isBlank()) {
+                values.add(first);
+            }
+            if (rest != null) {
+                rest.stream()
+                        .filter(value -> value != null && !value.isBlank())
+                        .forEach(values::add);
+            }
+            return String.join(" ", values);
+        }
+
+        private static String join(String... values) {
+            List<String> normalized = new ArrayList<>();
+            for (String value : values) {
+                if (value != null && !value.isBlank()) {
+                    normalized.add(value);
+                }
+            }
+            return String.join(" ", normalized);
+        }
     }
 }

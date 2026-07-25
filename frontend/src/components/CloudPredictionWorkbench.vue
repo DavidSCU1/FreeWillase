@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Activity,
   AlertCircle,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { usePredictionStore } from '@/stores/prediction'
+import { getEnzymeSequence } from '@/utils/api'
 import type { PredictionProvider, PredictionTask } from '@/types'
 
 const props = defineProps<{
@@ -25,6 +26,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 const store = usePredictionStore()
 
 const providerMeta = computed(() => {
@@ -188,6 +190,33 @@ function clearProviderTasks() {
   }
 }
 
+async function applyRoutePrefill() {
+  if (props.provider !== 'trrosettarna') return
+  const enzymeId = Number(route.query.enzymeId)
+  if (!enzymeId) return
+
+  try {
+    const sequence = await getEnzymeSequence(enzymeId)
+    if (!sequence?.trim()) {
+      return
+    }
+    const normalizedSequence = sequence.trim()
+    const prefillName = typeof route.query.name === 'string' && route.query.name.trim()
+      ? route.query.name.trim()
+      : (typeof route.query.accession === 'string' && route.query.accession.trim()
+        ? route.query.accession.trim()
+        : 'RNA sample')
+
+    store.name = prefillName
+    store.sequence = `>${prefillName}\n${normalizedSequence}`
+    store.error = normalizedSequence.length > 400
+      ? `已自动带入该 RNA 条目的序列，但长度为 ${normalizedSequence.length} nt，超过 trRosettaRNA 的 400 nt 上限。`
+      : null
+  } catch (error: any) {
+    store.error = error?.message || '读取 RNA 条目序列失败'
+  }
+}
+
 async function handleSubmit() {
   applyProviderDefaults()
   await store.submit()
@@ -258,6 +287,7 @@ onMounted(() => {
   applyProviderDefaults()
   store.error = null
   ensureProviderTaskSelected(providerTasks.value)
+  applyRoutePrefill()
 })
 
 onUnmounted(() => {

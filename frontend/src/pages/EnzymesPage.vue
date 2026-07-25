@@ -52,7 +52,7 @@ const {
   fetchAnnotations,
   saveAnnotation,
   removeAnnotation,
-  importFromUniProt,
+  importAutomatically,
 } = useEnzymeAnnotations()
 
 const selectedId = ref<number | null>(null)
@@ -138,6 +138,18 @@ function handleOpenMatcher() {
   router.push({
     path: '/matcher',
     query: { enzymeId: String(selectedId.value) },
+  })
+}
+
+function handleOpenRnaPrediction() {
+  if (!selectedEnzyme.value || !selectedId.value || selectedEnzyme.value.moleculeType !== 'RNA') return
+  router.push({
+    path: '/prediction/trrosettarna',
+    query: {
+      enzymeId: String(selectedId.value),
+      name: selectedEnzyme.value.proteinName || selectedEnzyme.value.accession,
+      accession: selectedEnzyme.value.accession,
+    },
   })
 }
 
@@ -246,24 +258,26 @@ async function handleDeleteAnnotation(annotation: EnzymeAnnotation) {
   }
 }
 
-async function handleImportUniProtAnnotations() {
+async function handleImportAnnotations() {
   if (!selectedId.value) return
   annotationError.value = ''
   annotationNotice.value = ''
-  if (selectedEnzyme.value?.moleculeType === 'RNA') {
-    annotationNotice.value = '核酶条目当前先保留手动标注与 3D 选点，不走 UniProt / PDB 自动导入。'
-    return
-  }
   try {
-    const imported = await importFromUniProt(selectedId.value)
+    const imported = await importAutomatically(selectedId.value)
     if (imported.length) {
       selectedAnnotationId.value = imported[0].id
-      annotationNotice.value = `已从 UniProt / PDB 导入 ${imported.length} 条注释`
+      annotationNotice.value = selectedEnzyme.value?.moleculeType === 'RNA'
+        ? `已从 NCBI Nucleotide 导入 ${imported.length} 条 RNA 注释`
+        : `已从 UniProt / PDB 导入 ${imported.length} 条注释`
       return
     }
-    annotationNotice.value = '没有新的 UniProt / PDB 注释可导入，可能已存在或该条目暂无可识别位点'
+    annotationNotice.value = selectedEnzyme.value?.moleculeType === 'RNA'
+      ? '没有新的 RNA 注释可导入，当前条目可能缺少可识别 feature 或已存在相同注释'
+      : '没有新的 UniProt / PDB 注释可导入，可能已存在或该条目暂无可识别位点'
   } catch (error) {
-    annotationError.value = error instanceof Error ? error.message : 'UniProt / PDB 注释导入失败'
+    annotationError.value = error instanceof Error
+      ? error.message
+      : (selectedEnzyme.value?.moleculeType === 'RNA' ? 'RNA 注释导入失败' : 'UniProt / PDB 注释导入失败')
   }
 }
 
@@ -350,7 +364,7 @@ const selectedEnzyme = computed(() => {
 
 const isRnaEntry = computed(() => selectedEnzyme.value?.moleculeType === 'RNA')
 const selectedSequenceUnit = computed(() => selectedEnzyme.value?.moleculeType === 'RNA' ? 'nt' : 'aa')
-const canImportUniProtAnnotations = computed(() => !isPredictedLibrary.value && selectedEnzyme.value?.moleculeType !== 'RNA')
+const canImportAutomaticAnnotations = computed(() => !isPredictedLibrary.value)
 const selectedNcbiSourceLabel = computed(() => {
   if (isPredictedLibrary.value) return 'SOURCE'
   return selectedEnzyme.value?.moleculeType === 'RNA' ? 'NCBI Nucleotide' : 'NCBI Protein'
@@ -359,9 +373,20 @@ const selectedSecondarySourceLabel = computed(() => {
   if (isPredictedLibrary.value) return 'Library Code'
   return selectedEnzyme.value?.moleculeType === 'RNA' ? 'RNA 注释源' : 'UniProt'
 })
+const importedAnnotationSourceLabels = computed(() => {
+  const labels = new Set<string>()
+  annotations.value.forEach((item) => {
+    if (item.sourceDb === 'UNIPROT') labels.add('UniProt')
+    else if (item.sourceDb === 'PDB') labels.add('PDB')
+    else if (item.sourceDb === 'NCBI_NUCLEOTIDE') labels.add('NCBI Nucleotide')
+  })
+  return Array.from(labels)
+})
 const selectedSecondarySourceValue = computed(() => {
   if (isPredictedLibrary.value) return selectedEnzyme.value?.code || '-'
-  if (selectedEnzyme.value?.moleculeType === 'RNA') return '暂未接入'
+  if (selectedEnzyme.value?.moleculeType === 'RNA') {
+    return importedAnnotationSourceLabels.value.length ? importedAnnotationSourceLabels.value.join(' / ') : '可从 NCBI 导入'
+  }
   return selectedEnzyme.value?.uniprotAccession || '-'
 })
 const hasCuratedStructure = computed(() => {
@@ -384,13 +409,27 @@ const selectedStructureSectionDescription = computed(() => {
 const selectedAnnotationToolTitle = computed(() => isRnaEntry.value ? 'RNA 序列注释工具' : '结构注释工具')
 const selectedAnnotationToolDescription = computed(() => {
   if (isRnaEntry.value) {
-    return '当前支持按序列区间手动标注 RNA 功能区、关键位点和突变位点。'
+    return '支持从 NCBI Nucleotide 导入基础 RNA 注释，并按序列区间继续手动补充。'
   }
   return '标注结构域、活性位点与突变位点，并联动 3D 视图查看'
 })
 const selectedImportedAnnotationLabel = computed(() => {
-  if (isRnaEntry.value) return '自动导入（RNA 注释暂未接入）'
+  if (isRnaEntry.value) return '自动导入（NCBI Nucleotide）'
   return '自动导入（UniProt / PDB）'
+})
+const selectedAnnotationImportButtonLabel = computed(() => {
+  if (isRnaEntry.value) return '从 NCBI 导入'
+  return '从 UniProt / PDB 导入'
+})
+const canLaunchRnaPrediction = computed(() => Boolean(
+  isRnaEntry.value
+  && selectedId.value
+  && (selectedEnzyme.value?.sequenceLength || 0) > 0
+  && (selectedEnzyme.value?.sequenceLength || 0) <= 400
+))
+const selectedRnaPredictionButtonLabel = computed(() => {
+  if (!isRnaEntry.value) return ''
+  return canLaunchRnaPrediction.value ? '送去 RNA 预测' : '超出 RNA 预测上限'
 })
 const canPickAnnotationFromStructure = computed(() => !isRnaEntry.value && canRenderStructureViewer.value)
 const rnaStructureSupportHint = computed(() => {
@@ -507,8 +546,8 @@ const selectedAnnotationSummary = computed(() => {
   }
   return selectedAnnotation.value.mutationLabel || `突变位点 ${selectedAnnotation.value.startResidue}`
 })
-const annotationImportedCount = computed(() => annotations.value.filter((item) => ['UNIPROT', 'PDB'].includes(item.sourceDb || '')).length)
-const manualAnnotationCount = computed(() => annotations.value.filter((item) => !['UNIPROT', 'PDB'].includes(item.sourceDb || '')).length)
+const annotationImportedCount = computed(() => annotations.value.filter((item) => ['UNIPROT', 'PDB', 'NCBI_NUCLEOTIDE'].includes(item.sourceDb || '')).length)
+const manualAnnotationCount = computed(() => annotations.value.filter((item) => !['UNIPROT', 'PDB', 'NCBI_NUCLEOTIDE'].includes(item.sourceDb || '')).length)
 
 watch(
   () => selectedId.value,
@@ -584,11 +623,10 @@ watch(
       return
     }
     const enzyme = selectedEnzyme.value
-    if (enzyme?.moleculeType === 'RNA') {
-      attemptedAutoImportAnnotationIds.add(enzymeId)
+    if (!enzyme) {
       return
     }
-    if (!enzyme?.uniprotAccession && !enzyme?.pdbId) {
+    if (enzyme.moleculeType !== 'RNA' && !enzyme.uniprotAccession && !enzyme.pdbId) {
       // #region debug-point D:auto-import-skipped
       fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'D', location: 'EnzymesPage.vue:autoImportWatch:520', msg: '[DEBUG] auto import skipped for missing uniprot accession', data: { enzymeId, pdbId: enzyme?.pdbId || null, structureId: enzyme?.structureId || null }, ts: Date.now() }) }).catch(() => {})
       // #endregion
@@ -600,18 +638,20 @@ watch(
       // #region debug-point E:auto-import-start
       fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:526', msg: '[DEBUG] auto import started', data: { enzymeId, uniprotAccession: enzyme.uniprotAccession, pdbId: enzyme.pdbId || null }, ts: Date.now() }) }).catch(() => {})
       // #endregion
-      const imported = await importFromUniProt(enzymeId)
+      const imported = await importAutomatically(enzymeId)
       // #region debug-point E:auto-import-result
       fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:528', msg: '[DEBUG] auto import finished', data: { enzymeId, importedCount: imported.length, sourceDbs: imported.map((item) => item.sourceDb || null) }, ts: Date.now() }) }).catch(() => {})
       // #endregion
       if (imported.length) {
-        annotationNotice.value = `已自动从 UniProt / PDB 补充 ${imported.length} 条初始注释`
+        annotationNotice.value = enzyme.moleculeType === 'RNA'
+          ? `已自动从 NCBI Nucleotide 补充 ${imported.length} 条初始 RNA 注释`
+          : `已自动从 UniProt / PDB 补充 ${imported.length} 条初始注释`
       }
     } catch (error) {
       // #region debug-point E:auto-import-error
       fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:533', msg: '[DEBUG] auto import failed', data: { enzymeId, error: error instanceof Error ? error.message : String(error) }, ts: Date.now() }) }).catch(() => {})
       // #endregion
-      console.error('自动补充 UniProt / PDB 注释失败', error)
+      console.error('自动补充注释失败', error)
     }
   },
   { immediate: true },
@@ -998,9 +1038,23 @@ onUnmounted(() => {
                     <div class="p-4 rounded-apple border border-apple-border bg-white/70 dark:bg-black/20">
                       <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">后续建议</p>
                       <p class="mt-2 text-sm font-semibold text-apple-text">
-                        {{ selectedEnzyme.sequenceLength > 400 ? '建议后续补接外部 RNA 结构来源' : '可补接 RNA 预测入口或人工上传结构' }}
+                        {{ selectedEnzyme.sequenceLength > 400 ? '建议后续补接外部 RNA 结构来源' : '可直接送往 RNA 预测或人工上传结构' }}
                       </p>
                     </div>
+                  </div>
+                  <div class="mt-4 flex items-center gap-3">
+                    <button
+                      type="button"
+                      class="apple-button-secondary !py-2.5 !px-4 text-xs flex items-center gap-2"
+                      :disabled="!canLaunchRnaPrediction"
+                      @click="handleOpenRnaPrediction"
+                    >
+                      <Sparkles :size="14" />
+                      {{ selectedRnaPredictionButtonLabel }}
+                    </button>
+                    <p class="text-[11px] text-apple-secondary-text">
+                      {{ canLaunchRnaPrediction ? '会自动带入条目名称和 RNA 主序列。' : '当前长度超过 trRosettaRNA 支持范围，先保留为注释条目更稳。' }}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -1030,15 +1084,15 @@ onUnmounted(() => {
                 </div>
                 <div class="flex items-center gap-2">
                   <button
-                    v-if="canImportUniProtAnnotations"
+                    v-if="canImportAutomaticAnnotations"
                     type="button"
                     class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
                     :disabled="importingAnnotations"
-                    @click="handleImportUniProtAnnotations"
+                    @click="handleImportAnnotations"
                   >
                     <Loader2 v-if="importingAnnotations" :size="12" class="animate-spin" />
                     <Wand2 v-else :size="12" />
-                    从 UniProt / PDB 导入
+                    {{ selectedAnnotationImportButtonLabel }}
                   </button>
                   <button
                     v-if="canPickAnnotationFromStructure"
@@ -1095,7 +1149,7 @@ onUnmounted(() => {
               <p v-if="annotationNotice" class="text-xs text-apple-blue">{{ annotationNotice }}</p>
               <p v-else-if="annotationError && !showAnnotationModal" class="text-xs text-red-500">{{ annotationError }}</p>
               <p v-if="isRnaEntry" class="text-xs text-apple-secondary-text">
-                RNA 条目当前先支持基于整条序列的手动区间标注；自动 RNA 注释源和 3D 联动后续再接入。
+                RNA 条目当前可从 NCBI Nucleotide 导入基础注释，并继续基于整条序列坐标补充手动区间标注。
               </p>
 
               <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">

@@ -149,6 +149,10 @@ export function getEnzymeStructure(enzymeId: number) {
   return request<string>(`/api/enzymes/${enzymeId}/structure`)
 }
 
+export function getEnzymeSequence(enzymeId: number) {
+  return request<string>(`/api/enzymes/${enzymeId}/sequence`)
+}
+
 export function listEnzymeAnnotations(enzymeId: number) {
   return request<EnzymeAnnotation[]>(`/api/enzymes/${enzymeId}/annotations`)
 }
@@ -175,6 +179,12 @@ export function deleteEnzymeAnnotation(enzymeId: number, annotationId: number) {
 
 export function importUniProtAnnotations(enzymeId: number) {
   return request<EnzymeAnnotation[]>(`/api/enzymes/${enzymeId}/annotations/import-uniprot`, {
+    method: 'POST',
+  })
+}
+
+export function importAutomaticAnnotations(enzymeId: number) {
+  return request<EnzymeAnnotation[]>(`/api/enzymes/${enzymeId}/annotations/import-auto`, {
     method: 'POST',
   })
 }
