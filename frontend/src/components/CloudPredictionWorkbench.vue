@@ -200,7 +200,11 @@ async function applyRoutePrefill() {
     if (!sequence?.trim()) {
       return
     }
-    const normalizedSequence = sequence.trim()
+    const normalizedSequence = sequence
+      .trim()
+      .replace(/\s+/g, '')
+      .toUpperCase()
+      .replace(/T/g, 'U')
     const prefillName = typeof route.query.name === 'string' && route.query.name.trim()
       ? route.query.name.trim()
       : (typeof route.query.accession === 'string' && route.query.accession.trim()

@@ -373,7 +373,10 @@ public class NcbiImportService {
                 .eq(EnzymeSequence::getIsPrimary, 1)
                 .orderByDesc(EnzymeSequence::getVersionNo)
                 .last("LIMIT 1"));
-        return sequence == null ? null : defaultString(sequence.getSequenceText());
+        if (sequence == null) {
+            return null;
+        }
+        return normalizeStoredSequence(sequence.getSequenceText(), sequence.getSourceType());
     }
 
     public EnzymeEntryResponse getEnzymeResponse(Long enzymeId) {
@@ -492,12 +495,13 @@ public class NcbiImportService {
     }
 
     private void savePrimarySequence(Long enzymeId, String sequence, int sequenceLength, String sourceType) {
+        String normalizedSequence = normalizeStoredSequence(sequence, sourceType);
         EnzymeSequence enzymeSequence = EnzymeSequence.builder()
                 .enzymeId(enzymeId)
                 .versionNo(1)
-                .sequenceText(sequence == null ? "" : sequence)
+                .sequenceText(normalizedSequence)
                 .sequenceLength(sequenceLength)
-                .sequenceHash(calculateHash(sequence))
+                .sequenceHash(calculateHash(normalizedSequence))
                 .isPrimary(1)
                 .sourceType(sourceType)
                 .createdAt(LocalDateTime.now())
@@ -1242,6 +1246,14 @@ public class NcbiImportService {
 
     private String normalizeSequence(String sequence) {
         return defaultString(sequence).replaceAll("\\s+", "").toUpperCase();
+    }
+
+    private String normalizeStoredSequence(String sequence, String sourceType) {
+        String normalized = defaultString(sequence).replaceAll("\\s+", "").toUpperCase();
+        if ("NCBI_NUCLEOTIDE".equalsIgnoreCase(defaultString(sourceType))) {
+            return normalized.replace('T', 'U');
+        }
+        return normalized;
     }
 
     private void validateMiniFoldSaveRequest(SaveMiniFoldEnzymeRequest request) {
