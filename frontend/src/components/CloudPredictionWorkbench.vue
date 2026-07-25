@@ -21,32 +21,13 @@ import { usePredictionStore } from '@/stores/prediction'
 import type { PredictionProvider, PredictionTask } from '@/types'
 
 const props = defineProps<{
-  provider: Extract<PredictionProvider, 'nvidia' | 'rnafold' | 'trrosettarna'>
+  provider: Extract<PredictionProvider, 'nvidia' | 'trrosettarna'>
 }>()
 
 const router = useRouter()
 const store = usePredictionStore()
 
 const providerMeta = computed(() => {
-  if (props.provider === 'rnafold') {
-    return {
-      title: 'RNAfold 工作台',
-      description: '专门处理单条 RNA 二级结构预测，聚焦序列输入、能量结果和 dot-bracket 返回。',
-      providerLabel: 'RNAfold',
-      inputLabel: '输入 RNA 序列',
-      inputHint: '支持 Plain 或单条 FASTA，标题行会自动忽略。',
-      inputPlaceholder: '>sample_rna\nGGGAAAUCC',
-      example: '>sample_rna\nGGGAAAUCC',
-      typeLabel: 'RNA',
-      modeLabel: '单条',
-      modelLabel: 'rnafold',
-      needsApiKey: false,
-      apiHint: '通过系统后端代理调用，无需额外填写 API Key。',
-      resultLabel: '二级结构结果',
-      summarySuffix: 'nt',
-    }
-  }
-
   if (props.provider === 'trrosettarna') {
     return {
       title: 'trRosettaRNA 工作台',
@@ -178,7 +159,7 @@ const activeTaskSummary = computed(() => {
 function applyProviderDefaults() {
   store.provider = props.provider
   store.submitMode = 'single'
-  store.moleculeType = props.provider === 'rnafold' ? 'RNA' : 'protein'
+  store.moleculeType = props.provider === 'trrosettarna' ? 'RNA' : 'protein'
 }
 
 function ensureProviderTaskSelected(tasks: PredictionTask[]) {
@@ -191,7 +172,7 @@ function ensureProviderTaskSelected(tasks: PredictionTask[]) {
 function fillExample() {
   store.sequence = providerMeta.value.example
   if (!store.name.trim()) {
-    store.name = (props.provider === 'rnafold' || props.provider === 'trrosettarna') ? 'RNA sample' : 'Protein sample'
+    store.name = props.provider === 'trrosettarna' ? 'RNA sample' : 'Protein sample'
   }
 }
 
@@ -517,7 +498,7 @@ onUnmounted(() => {
                   :format="store.viewerFormat === 'mmcif' ? 'mmcif' : 'pdb'"
                   class="w-full h-full"
                 />
-                <div v-else-if="(store.viewerFormat === 'dot-bracket' || !store.viewerUrl) && store.lastStructureText" class="h-full p-6 overflow-auto bg-apple-background/30">
+                <div v-else-if="store.lastStructureText" class="h-full p-6 overflow-auto bg-apple-background/30">
                   <pre class="text-xs font-mono text-apple-text whitespace-pre-wrap">{{ store.lastStructureText }}</pre>
                 </div>
                 <div v-else class="flex flex-col items-center justify-center h-full text-apple-secondary-text gap-4">
@@ -538,11 +519,6 @@ onUnmounted(() => {
                 <div v-if="currentTask.result.ptm != null" class="space-y-2">
                   <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">Global Score (pTM)</label>
                   <div class="text-xl font-bold text-apple-text">{{ currentTask.result.ptm.toFixed(3) }}</div>
-                </div>
-
-                <div v-if="currentTask.result.mfeEnergy != null" class="space-y-2">
-                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">MFE Energy</label>
-                  <div class="text-xl font-bold text-apple-text">{{ currentTask.result.mfeEnergy.toFixed(2) }} <span class="text-[10px]">kcal/mol</span></div>
                 </div>
 
                 <div v-if="currentTask.result.analysis" class="space-y-2">

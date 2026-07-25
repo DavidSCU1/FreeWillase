@@ -1,0 +1,47 @@
+[11:45:43] Loaded environment file: D:\FreeWillase\minifold_runtime\.env.local
+[11:45:43] Loaded environment file: D:\FreeWillase\minifold_runtime\.env
+[11:45:43] ==== FreeWillase MiniFold Runtime Started ====
+[11:45:43] Sequence length: 74
+[11:45:43] Target chains: 4
+[11:45:43] Acceleration: enabled
+[11:45:43] Backend: directml
+[11:45:43] 读取 FASTA: D:\FreeWillase\minifold_runtime\tasks\2beee289\input.fasta
+[11:45:43] 处理序列: task (长度 74)
+[11:45:43] 候选生成完成，尝试数 5，行数 5。
+[11:45:43]   [SS-Gen Log] Info: Using PyBioMed for AAIndex properties.
+[11:45:43]   [SS-Gen Log] Info: Enforcing target chain count = 4
+[11:46:15] Ark 投票完成：共尝试 5 个模型，成功 5 个，最佳分 0.95
+[11:46:15]   Case 1: Avg=0.68, Med=0.75
+[11:46:15]     - doubao-seed-1-6-251015: 0.75
+[11:46:15]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[11:46:15]     - deepseek-v3-2-251201: 0.60
+[11:46:15]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[11:46:15]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[11:46:15]   Case 2: Avg=0.90, Med=1.00
+[11:46:15]     - doubao-seed-1-6-251015: 1.00
+[11:46:15]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[11:46:15]     - deepseek-v3-2-251201: 0.80
+[11:46:15]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[11:46:15]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[11:46:15]   Case 3: Avg=0.90, Med=1.00
+[11:46:15]     - doubao-seed-1-6-251015: 1.00
+[11:46:15]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[11:46:15]     - deepseek-v3-2-251201: 0.80
+[11:46:15]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[11:46:15]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[11:46:15]   Case 4: Avg=0.55, Med=1.00
+[11:46:15]     - doubao-seed-1-6-251015: 1.00
+[11:46:15]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[11:46:15]     - deepseek-v3-2-251201: 0.10
+[11:46:15]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[11:46:15]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[11:46:15]   Case 5: Avg=0.85, Med=0.90
+[11:46:15]     - doubao-seed-1-6-251015: 0.90
+[11:46:15]     - doubao-1-5-thinking-pro-250415: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint doubao-1-5-think)
+[11:46:15]     - deepseek-v3-2-251201: 0.80
+[11:46:15]     - kimi-k2-thinking-251104: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint kimi-k2-thinking)
+[11:46:15]     - deepseek-r1-250528: FAILED (HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound","message":"The model or endpoint deepseek-r1-2505)
+[11:46:15]   使用原始最佳案例 Case 2 (Score: 0.95)
+[11:46:52] 功能注释完成。
+[11:46:52] 生成 3D 结构...
+[11:46:52]   > Case 2 (p=0.95): Optimizing backbone (iGPU, backend=directml)...

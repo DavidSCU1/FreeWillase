@@ -44,9 +44,10 @@ public class PredictionService {
             Path payloadPath = taskDir.resolve("request.json");
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(payloadPath.toFile(), payload);
 
+            String moleculeType = defaultString(request.getMoleculeType(), "protein");
             List<String> command = new ArrayList<>(resolvePythonCommand(request));
             command.add("-u");
-            command.add(getWorkerScript().toString());
+            command.add(getWorkerScript(moleculeType).toString());
             command.add("--task-dir");
             command.add(taskDir.toString());
             command.add("--payload");
@@ -133,6 +134,7 @@ public class PredictionService {
 
     private Map<String, Object> buildPayload(MiniFoldPredictionRequest request) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("moleculeType", defaultString(request.getMoleculeType(), "protein"));
         payload.put("sequence", request.getSequence());
         payload.put("envText", defaultString(request.getEnvText()));
         payload.put("targetChains", request.getTargetChains());
@@ -256,8 +258,9 @@ public class PredictionService {
         return getProjectRoot().resolve("minifold_runtime");
     }
 
-    private Path getWorkerScript() {
-        Path worker = getRuntimeRoot().resolve("worker.py");
+    private Path getWorkerScript(String moleculeType) {
+        String scriptName = "RNA".equalsIgnoreCase(moleculeType) ? "worker_rna.py" : "worker.py";
+        Path worker = getRuntimeRoot().resolve(scriptName);
         if (!Files.exists(worker)) {
             throw new IllegalStateException("未找到内置 MiniFold worker: " + worker);
         }
@@ -270,6 +273,10 @@ public class PredictionService {
 
     private String defaultString(String value) {
         return value == null ? "" : value;
+    }
+
+    private String defaultString(String value, String defaultValue) {
+        return value == null || value.isBlank() ? defaultValue : value;
     }
 
     private String stripWrappingQuotes(String value) {

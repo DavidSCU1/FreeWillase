@@ -88,7 +88,7 @@ export interface LiteratureRecord {
   savedToLibrary?: boolean
 }
 
-export type PredictionProvider = 'nvidia' | 'rnafold' | 'minifold' | 'trrosettarna'
+export type PredictionProvider = 'nvidia' | 'minifold' | 'trrosettarna'
 
 export type MoleculeType = 'protein' | 'RNA' | 'DNA'
 
@@ -111,19 +111,12 @@ export interface PredictionRequest {
 export interface PredictionResult {
   providerName: string
   modelName: string
-  format: 'pdb' | 'mmcif' | 'dot-bracket'
+  format: 'pdb' | 'mmcif'
   structure: string
   sequence?: string
   plddt?: number
   ptm?: number
   resultPageUrl?: string
-  mfeStructure?: string
-  mfeEnergy?: number
-  ensembleFreeEnergy?: number
-  mfeFrequency?: number
-  ensembleDiversity?: number
-  centroidStructure?: string
-  centroidEnergy?: number
   analysis?: string
   taskId?: string
 }

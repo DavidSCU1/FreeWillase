@@ -50,15 +50,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(RestClientException.class)
     public ResponseEntity<ErrorResponse> handleRestClientException(RestClientException ex) {
-        String detail = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
-        String message = "上游服务请求失败，请稍后重试";
-        if (detail != null) {
-            String t = detail.toLowerCase();
-            if (t.contains("rna.tbi.univie.ac.at") || t.contains("unable to connect") || t.contains("connection") || t.contains("connect")) {
-                message = "无法连接 RNAfold 网站（rna.tbi.univie.ac.at）。可能是网络/防火墙限制，请配置代理或在可访问网络部署后端。";
-            }
-        }
-        return buildErrorResponse(HttpStatus.BAD_GATEWAY, message);
+        return buildErrorResponse(HttpStatus.BAD_GATEWAY, "上游服务请求失败，请稍后重试");
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

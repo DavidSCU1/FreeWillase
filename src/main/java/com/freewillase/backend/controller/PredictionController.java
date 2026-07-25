@@ -2,7 +2,6 @@ package com.freewillase.backend.controller;
 
 import com.freewillase.backend.dto.*;
 import com.freewillase.backend.service.PredictionService;
-import com.freewillase.backend.service.RnaFoldService;
 import com.freewillase.backend.service.TrRosettaRnaService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,7 +14,6 @@ import org.springframework.web.bind.annotation.*;
 public class PredictionController {
 
     private final PredictionService predictionService;
-    private final RnaFoldService rnaFoldService;
     private final TrRosettaRnaService trRosettaRnaService;
 
     @PostMapping("/minifold")
@@ -30,11 +28,6 @@ public class PredictionController {
             throw new IllegalArgumentException("序列不能为空");
         }
         return predictionService.predictWithMiniFold(request);
-    }
-
-    @PostMapping("/rnafold")
-    public RnaFoldPredictionResponse predictRnaFold(@RequestBody RnaFoldPredictionRequest request) {
-        return rnaFoldService.predict(request.getName(), request.getSequence());
     }
 
     @PostMapping("/trrosettarna")

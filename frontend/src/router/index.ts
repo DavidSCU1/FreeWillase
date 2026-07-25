@@ -6,7 +6,6 @@ import LiteraturePage from '@/pages/LiteraturePage.vue'
 import PredictionPage from '@/pages/PredictionPage.vue'
 import MiniFoldPage from '@/pages/MiniFoldPage.vue'
 import NvidiaFoldPage from '@/pages/NvidiaFoldPage.vue'
-import RNAFoldPage from '@/pages/RNAFoldPage.vue'
 import TrRosettaRnaPage from '@/pages/TrRosettaRnaPage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
 
@@ -74,11 +73,6 @@ const routes: RouteRecordRaw[] = [
     path: '/prediction/nvidia',
     name: 'prediction-nvidia',
     component: NvidiaFoldPage,
-  },
-  {
-    path: '/prediction/rnafold',
-    name: 'prediction-rnafold',
-    component: RNAFoldPage,
   },
   {
     path: '/prediction/trrosettarna',

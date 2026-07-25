@@ -281,10 +281,13 @@ const suggestedLibraryName = computed(() => {
 })
 
 function fillExample() {
-  store.sequence = `>sample_1
-MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK`
+  store.sequence = store.moleculeType === 'protein' ? `>sample_1
+MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK` : `>sample_rna
+GGGCUAUUAGCUCAGUUGGUUAGAGCGCACCCCUGAUAAGGGUGAGGUCGCUGAUUCGAAUUCAGCAUAGCCCA`;
   if (!store.envText.trim()) {
-    store.envText = '线粒体相关酶，倾向形成稳定紧凑构象，尽量避免疏水核心过度暴露。'
+    store.envText = store.moleculeType === 'protein' 
+      ? '线粒体相关酶，倾向形成稳定紧凑构象，尽量避免疏水核心过度暴露。'
+      : '包含 Mg2+，倾向于形成经典的 A-form 茎区和稳定的假结或三通结构。';
   }
 }
 
@@ -424,7 +427,7 @@ async function handleSaveToLibrary() {
   try {
     isSavingToLibrary.value = true
     saveToLibraryError.value = ''
-    const normalizedSequence = normalizeSequenceInput(store.sequence, 'protein')
+    const normalizedSequence = normalizeSequenceInput(store.sequence, store.moleculeType)
     savedLibraryEntry.value = await saveMiniFoldEnzyme({
       name: libraryEntryName.value.trim(),
       sequence: normalizedSequence,
@@ -513,6 +516,23 @@ onUnmounted(() => {
             </div>
 
             <div class="flex flex-wrap gap-2">
+              <div class="flex items-center bg-apple-background/50 p-1 rounded-full border border-apple-border mr-2">
+                <button
+                  class="px-4 py-1 text-xs font-bold rounded-full transition-all duration-200"
+                  :class="store.moleculeType === 'protein' ? 'bg-apple-blue text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
+                  @click="store.moleculeType = 'protein'"
+                >
+                  蛋白质 (Protein)
+                </button>
+                <button
+                  class="px-4 py-1 text-xs font-bold rounded-full transition-all duration-200"
+                  :class="store.moleculeType === 'RNA' ? 'bg-emerald-500 text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
+                  @click="store.moleculeType = 'RNA'"
+                >
+                  核糖核酸 (RNA)
+                </button>
+              </div>
+
               <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold" :class="statusMeta.chipClass">
                 <Activity v-if="store.status === 'running'" class="animate-pulse" :size="12" />
                 <CheckCircle2 v-else-if="store.status === 'success'" :size="12" />
@@ -766,7 +786,7 @@ onUnmounted(() => {
                   <p class="text-[11px] text-apple-secondary-text">可写生物学场景、亚细胞定位、跨膜偏好或希望避免的构象倾向。</p>
                 </div>
 
-                <div class="space-y-4">
+                <div v-if="store.moleculeType === 'protein'" class="space-y-4">
                   <div class="space-y-2">
                     <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">目标链数</label>
                     <select
@@ -783,6 +803,13 @@ onUnmounted(() => {
                   <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4 text-[11px] leading-relaxed text-apple-secondary-text">
                     <p class="font-bold text-apple-text">当前理解</p>
                     <p class="mt-2">链数：{{ targetChainLabel }}</p>
+                    <p class="mt-1">环境：{{ envLength ? '已提供上下文约束' : '未提供，模型将主要依赖序列本身' }}</p>
+                  </div>
+                </div>
+                <div v-else class="space-y-4">
+                  <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4 text-[11px] leading-relaxed text-apple-secondary-text">
+                    <p class="font-bold text-apple-text">当前理解</p>
+                    <p class="mt-2">模式：核糖核酸 (RNA)</p>
                     <p class="mt-1">环境：{{ envLength ? '已提供上下文约束' : '未提供，模型将主要依赖序列本身' }}</p>
                   </div>
                 </div>
@@ -815,35 +842,37 @@ onUnmounted(() => {
                 <p class="text-[11px] text-apple-secondary-text">留空时继续使用 `MINIFOLD_PYTHON` 或系统 Python；填环境名会执行 `conda run -n 环境名 python`，填 `.exe` / 路径则直接调用该解释器。</p>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  class="rounded-apple border p-4 text-left transition-all"
-                  :class="store.useAcceleration ? 'border-apple-blue/40 bg-apple-blue/5' : 'border-apple-border bg-apple-background/40'"
-                  @click="store.useAcceleration = true"
-                >
-                  <p class="text-xs font-bold text-apple-text">启用加速</p>
-                  <p class="mt-1 text-[11px] text-apple-secondary-text">尝试使用本机显卡或特定后端进行折叠。</p>
-                </button>
-                <button
-                  type="button"
-                  class="rounded-apple border p-4 text-left transition-all"
-                  :class="!store.useAcceleration ? 'border-apple-blue/40 bg-apple-blue/5' : 'border-apple-border bg-apple-background/40'"
-                  @click="store.useAcceleration = false"
-                >
-                  <p class="text-xs font-bold text-apple-text">仅 CPU</p>
-                  <p class="mt-1 text-[11px] text-apple-secondary-text">禁用显卡后端，走最稳妥的 CPU 路线。</p>
-                </button>
-              </div>
+              <div v-if="store.moleculeType === 'protein'">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                  <button
+                    type="button"
+                    class="rounded-apple border p-4 text-left transition-all"
+                    :class="store.useAcceleration ? 'border-apple-blue/40 bg-apple-blue/5' : 'border-apple-border bg-apple-background/40'"
+                    @click="store.useAcceleration = true"
+                  >
+                    <p class="text-xs font-bold text-apple-text">启用加速</p>
+                    <p class="mt-1 text-[11px] text-apple-secondary-text">尝试使用本机显卡或特定后端进行折叠。</p>
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-apple border p-4 text-left transition-all"
+                    :class="!store.useAcceleration ? 'border-apple-blue/40 bg-apple-blue/5' : 'border-apple-border bg-apple-background/40'"
+                    @click="store.useAcceleration = false"
+                  >
+                    <p class="text-xs font-bold text-apple-text">仅 CPU</p>
+                    <p class="mt-1 text-[11px] text-apple-secondary-text">禁用显卡后端，走最稳妥的 CPU 路线。</p>
+                  </button>
+                </div>
 
-              <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">后端类型</label>
-                <select v-model="store.backend" class="apple-input text-xs" :disabled="!store.useAcceleration">
-                  <option v-for="item in backendOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-                </select>
-                <p class="text-[11px] text-apple-secondary-text">
-                  {{ backendHint }}
-                </p>
+                <div class="space-y-2 mt-4">
+                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">后端类型</label>
+                  <select v-model="store.backend" class="apple-input text-xs" :disabled="!store.useAcceleration">
+                    <option v-for="item in backendOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+                  </select>
+                  <p class="text-[11px] text-apple-secondary-text">
+                    {{ backendHint }}
+                  </p>
+                </div>
               </div>
 
               <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
