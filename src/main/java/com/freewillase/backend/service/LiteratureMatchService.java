@@ -23,7 +23,11 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 @Slf4j
@@ -67,33 +71,32 @@ public class LiteratureMatchService {
         
         if (accession == null || name == null) return;
 
-        // 2. Multi-stage search strategy
-        java.util.Map<String, NcbiEutilsClient.PubMedResult> resultsMap = new java.util.LinkedHashMap<>();
-        java.util.Set<String> accessionHits = new java.util.HashSet<>();
-        
-        // Strategy A: Accession + Genus (High Precision)
+        boolean rnaLike = isRnaLikeEntry(enzyme);
+        Map<String, NcbiEutilsClient.PubMedResult> resultsMap = new LinkedHashMap<>();
+        Map<String, Integer> resultBaseScores = new LinkedHashMap<>();
         String genus = (organism != null && organism.contains(" ")) ? organism.split(" ")[0] : "";
-        String accQuery = accession + (genus.isEmpty() ? "" : " " + genus);
-        List<NcbiEutilsClient.PubMedResult> accResults = ncbiClient.searchPubMed(accQuery, 5, email, apiKey);
-        for (NcbiEutilsClient.PubMedResult r : accResults) {
-            resultsMap.put(r.getPmid(), r);
-            accessionHits.add(r.getPmid());
+
+        if (rnaLike) {
+            for (NcbiEutilsClient.NucleotideReference reference : ncbiClient.fetchNucleotideReferences(accession, email, apiKey)) {
+                NcbiEutilsClient.PubMedResult referenceResult = NcbiEutilsClient.PubMedResult.builder()
+                        .pmid(reference.getPmid())
+                        .title(reference.getTitle())
+                        .authors(reference.getAuthors())
+                        .journal(reference.getJournal())
+                        .publishYear(reference.getPublishYear())
+                        .doi("")
+                        .build();
+                mergePubMedResult(resultsMap, resultBaseScores, referenceResult, 95);
+            }
         }
         
-        // Strategy B: Cleaned Name + Genus (High Recall)
-        if (resultsMap.size() < 10 && name != null && !genus.isEmpty()) {
-            String cleanName = name.replaceAll("\\[.*?\\]", "").replaceAll("\\(.*?\\)", "").trim();
-            String nameQuery = String.format("\"%s\" AND %s", cleanName, genus);
-            ncbiClient.searchPubMed(nameQuery, 10, email, apiKey)
-                    .forEach(r -> resultsMap.putIfAbsent(r.getPmid(), r));
+        for (SearchPlan plan : buildSearchPlans(enzyme, rnaLike, genus)) {
+            ncbiClient.searchPubMed(plan.query(), plan.maxResults(), email, apiKey)
+                    .forEach(result -> mergePubMedResult(resultsMap, resultBaseScores, result, plan.baseScore()));
         }
 
-        // 3. Process collected results
-        resultsMap.values().forEach(r -> {
-            // If it came from accession search, give it a significant head start
-            int baseScore = accessionHits.contains(r.getPmid()) ? 70 : 0;
-            processPubMedResult(r, enzyme, baseScore);
-        });
+        resultsMap.values().forEach(result ->
+                processPubMedResult(result, enzyme, resultBaseScores.getOrDefault(result.getPmid(), 0)));
     }
 
     @org.springframework.scheduling.annotation.Async
@@ -209,6 +212,8 @@ public class LiteratureMatchService {
         String organism = (enzyme.getOrganism() != null) ? enzyme.getOrganism().toLowerCase() : "";
         String accession = (enzyme.getProteinAccession() != null) ? enzyme.getProteinAccession().toLowerCase() : "";
         String ec = (enzyme.getEcNumber() != null) ? enzyme.getEcNumber().toLowerCase() : "";
+        boolean rnaLike = isRnaLikeEntry(enzyme);
+        String simplifiedRnaName = simplifyRnaName(enzyme.getName()).toLowerCase(Locale.ROOT);
 
         // Log for debugging
         log.debug("Scoring PMID {} against Accession {}: Title={}", pubMed.getPmid(), accession, title);
@@ -231,6 +236,24 @@ public class LiteratureMatchService {
         // 4. EC Number match (Strong)
         if (!ec.isEmpty() && title.contains(ec)) {
             score += 30;
+        }
+
+        if (rnaLike) {
+            if (!simplifiedRnaName.isEmpty() && title.contains(simplifiedRnaName)) {
+                score += 40;
+            }
+            if (proteinName.contains("viroid") && title.contains("viroid")) {
+                score += 20;
+            }
+            if (proteinName.contains("ribozyme") && title.contains("ribozyme")) {
+                score += 20;
+            }
+            if (proteinName.contains("hammerhead") && title.contains("hammerhead")) {
+                score += 20;
+            }
+            if ((proteinName.contains("rna") || proteinName.contains("mrna")) && title.contains("rna")) {
+                score += 10;
+            }
         }
 
         // 5. Penalties for very short titles or generic terms
@@ -271,6 +294,108 @@ public class LiteratureMatchService {
         enrichWithFullTextAttachment(record);
         literatureMapper.updateById(record);
         return buildDisplayRecord(relation, record);
+    }
+
+    private List<SearchPlan> buildSearchPlans(EnzymeEntry enzyme, boolean rnaLike, String genus) {
+        List<SearchPlan> plans = new ArrayList<>();
+        String accession = defaultString(enzyme.getProteinAccession()).trim();
+        String cleanName = cleanName(enzyme.getName());
+        if (!accession.isEmpty()) {
+            String accessionQuery = accession + (genus.isEmpty() ? "" : " " + genus);
+            plans.add(new SearchPlan(accessionQuery, 6, 70));
+            if (rnaLike) {
+                plans.add(new SearchPlan(accession, 6, 65));
+            }
+        }
+        if (!cleanName.isEmpty()) {
+            String nameQuery = genus.isEmpty()
+                    ? "\"" + cleanName + "\""
+                    : String.format("\"%s\" AND %s", cleanName, genus);
+            plans.add(new SearchPlan(nameQuery, 10, rnaLike ? 50 : 35));
+        }
+        if (rnaLike) {
+            String simplifiedName = simplifyRnaName(enzyme.getName());
+            if (!simplifiedName.isEmpty() && !simplifiedName.equalsIgnoreCase(cleanName)) {
+                plans.add(new SearchPlan("\"" + simplifiedName + "\"", 10, 55));
+            }
+            if (!simplifiedName.isEmpty() && enzyme.getName() != null && enzyme.getName().toLowerCase(Locale.ROOT).contains("hammerhead")) {
+                plans.add(new SearchPlan("\"" + simplifiedName + "\" AND hammerhead", 8, 60));
+            }
+            if (!simplifiedName.isEmpty() && enzyme.getName() != null && enzyme.getName().toLowerCase(Locale.ROOT).contains("viroid")) {
+                plans.add(new SearchPlan("\"" + simplifiedName + "\" AND viroid", 8, 60));
+            }
+            if (!simplifiedName.isEmpty() && enzyme.getName() != null && enzyme.getName().toLowerCase(Locale.ROOT).contains("ribozyme")) {
+                plans.add(new SearchPlan("\"" + simplifiedName + "\" AND ribozyme", 8, 60));
+            }
+        }
+        return deduplicatePlans(plans);
+    }
+
+    private List<SearchPlan> deduplicatePlans(List<SearchPlan> plans) {
+        List<SearchPlan> deduplicated = new ArrayList<>();
+        Set<String> seenQueries = new java.util.HashSet<>();
+        for (SearchPlan plan : plans) {
+            String query = defaultString(plan.query()).trim();
+            if (query.isEmpty()) {
+                continue;
+            }
+            String normalized = query.toLowerCase(Locale.ROOT);
+            if (seenQueries.add(normalized)) {
+                deduplicated.add(plan);
+            }
+        }
+        return deduplicated;
+    }
+
+    private void mergePubMedResult(Map<String, NcbiEutilsClient.PubMedResult> resultsMap,
+                                   Map<String, Integer> resultBaseScores,
+                                   NcbiEutilsClient.PubMedResult result,
+                                   int baseScore) {
+        if (result == null || result.getPmid() == null || result.getPmid().isBlank()) {
+            return;
+        }
+        resultsMap.putIfAbsent(result.getPmid(), result);
+        resultBaseScores.merge(result.getPmid(), baseScore, Math::max);
+    }
+
+    private boolean isRnaLikeEntry(EnzymeEntry enzyme) {
+        String combined = String.join(" ",
+                defaultString(enzyme.getName()),
+                defaultString(enzyme.getDescription()),
+                defaultString(enzyme.getOrganism()))
+                .toLowerCase(Locale.ROOT);
+        return combined.contains("ribozyme")
+                || combined.contains("viroid")
+                || combined.contains("hammerhead")
+                || combined.contains("mrna")
+                || combined.contains("rna");
+    }
+
+    private String cleanName(String value) {
+        return defaultString(value)
+                .replaceAll("\\[.*?\\]", " ")
+                .replaceAll("\\(.*?\\)", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String simplifyRnaName(String value) {
+        String cleaned = cleanName(value);
+        cleaned = cleaned.replaceAll("(?i),\\s*(complete sequence|partial sequence).*", "");
+        cleaned = cleaned.replaceAll("(?i),\\s*(variant|isolate|strain).*", "");
+        cleaned = cleaned.replaceAll("(?i),\\s*a\\s+hammerhead.*", "");
+        cleaned = cleaned.replaceAll("(?i)complete sequence.*", "");
+        cleaned = cleaned.replaceAll("(?i)variant\\s+[^,;]+", "");
+        cleaned = cleaned.replaceAll("(?i)isolate\\s+[^,;]+", "");
+        cleaned = cleaned.replaceAll("\\s+", " ").trim();
+        return cleaned;
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
+    }
+
+    private record SearchPlan(String query, int maxResults, int baseScore) {
     }
 
     public List<LiteratureRecord> listAll() {

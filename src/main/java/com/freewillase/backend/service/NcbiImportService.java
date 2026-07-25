@@ -60,6 +60,7 @@ public class NcbiImportService {
     public static final String MOLECULE_TYPE_RNA = "RNA";
     private static final Set<String> SUPPORTED_ANNOTATION_TYPES = Set.of("DOMAIN", "ACTIVE_SITE", "MUTATION");
     private static final String ANNOTATION_SOURCE_UNIPROT = "UNIPROT";
+    private static final String ANNOTATION_SOURCE_NCBI_NUCLEOTIDE = "NCBI_NUCLEOTIDE";
     private static final int ANNOTATION_TITLE_MAX_LENGTH = 512;
     private static final int ANNOTATION_MUTATION_LABEL_MAX_LENGTH = 255;
     private static final int ANNOTATION_SOURCE_REF_MAX_LENGTH = 255;
@@ -431,6 +432,19 @@ public class NcbiImportService {
         }
     }
 
+    public String getPrimarySequenceText(Long enzymeId) {
+        ensureEnzymeExists(enzymeId);
+        EnzymeSequence sequence = enzymeSequenceMapper.selectOne(new LambdaQueryWrapper<EnzymeSequence>()
+                .eq(EnzymeSequence::getEnzymeId, enzymeId)
+                .eq(EnzymeSequence::getIsPrimary, 1)
+                .orderByDesc(EnzymeSequence::getVersionNo)
+                .last("LIMIT 1"));
+        if (sequence == null) {
+            return null;
+        }
+        return normalizeStoredSequence(sequence.getSequenceText(), sequence.getSourceType());
+    }
+
     public EnzymeEntryResponse getEnzymeResponse(Long enzymeId) {
         EnzymeEntry entry = enzymeEntryMapper.selectById(enzymeId);
         if (entry == null) {
@@ -487,6 +501,9 @@ public class NcbiImportService {
     public List<EnzymeAnnotation> importAnnotationsFromUniProt(Long enzymeId) {
         EnzymeEntry entry = ensureEnzymeExists(enzymeId);
         EnzymeEntryResponse response = getEnzymeResponse(enzymeId);
+        if (MOLECULE_TYPE_RNA.equalsIgnoreCase(response.getMoleculeType())) {
+            return importAnnotationsFromNcbiNucleotide(enzymeId, entry, response);
+        }
         Optional<UniProtClient.ProteinEnrichment> enrichment = loadUniProtEnrichmentForAnnotations(entry, response);
         List<EnzymeAnnotation> existing = listAnnotations(enzymeId);
         List<EnzymeAnnotation> imported = new ArrayList<>();
@@ -505,6 +522,11 @@ public class NcbiImportService {
             throw new IllegalArgumentException("当前酶条目缺少 UniProt accession 和 PDB 结构编号，暂时无法自动导入初始注释");
         }
         return imported;
+    }
+
+    @Transactional
+    public List<EnzymeAnnotation> importAnnotationsAutomatically(Long enzymeId) {
+        return importAnnotationsFromUniProt(enzymeId);
     }
 
     @Transactional
@@ -539,12 +561,13 @@ public class NcbiImportService {
     }
 
     private void savePrimarySequence(Long enzymeId, String sequence, int sequenceLength, String sourceType) {
+        String normalizedSequence = normalizeStoredSequence(sequence, sourceType);
         EnzymeSequence enzymeSequence = EnzymeSequence.builder()
                 .enzymeId(enzymeId)
                 .versionNo(1)
-                .sequenceText(sequence == null ? "" : sequence)
+                .sequenceText(normalizedSequence)
                 .sequenceLength(sequenceLength)
-                .sequenceHash(calculateHash(sequence))
+                .sequenceHash(calculateHash(normalizedSequence))
                 .isPrimary(1)
                 .sourceType(sourceType)
                 .createdAt(LocalDateTime.now())
@@ -957,6 +980,56 @@ public class NcbiImportService {
         return imported;
     }
 
+    private List<EnzymeAnnotation> importAnnotationsFromNcbiNucleotide(Long enzymeId,
+                                                                       EnzymeEntry entry,
+                                                                       EnzymeEntryResponse response) {
+        String accession = trimToNull(response.getNcbiAccession());
+        if (accession == null) {
+            accession = trimToNull(entry.getProteinAccession());
+        }
+        if (accession == null) {
+            throw new IllegalArgumentException("当前 RNA 条目缺少 NCBI Nucleotide accession，暂时无法自动导入注释");
+        }
+
+        List<EnzymeAnnotation> existing = listAnnotations(enzymeId);
+        List<NcbiEutilsClient.NucleotideFeatureAnnotation> features =
+                ncbiEutilsClient.fetchNucleotideFeatureAnnotations(accession, null, null);
+        if (features.isEmpty()) {
+            return List.of();
+        }
+
+        List<EnzymeAnnotation> imported = new ArrayList<>();
+        for (NcbiEutilsClient.NucleotideFeatureAnnotation feature : features) {
+            if (annotationAlreadyExists(
+                    existing,
+                    feature.getAnnotationType(),
+                    feature.getStartResidue(),
+                    feature.getEndResidue(),
+                    feature.getTitle(),
+                    feature.getSourceDb(),
+                    feature.getSourceRef())) {
+                continue;
+            }
+            EnzymeAnnotation annotation = buildImportedAnnotation(
+                    enzymeId,
+                    feature.getAnnotationType(),
+                    feature.getTitle(),
+                    feature.getStartResidue(),
+                    feature.getEndResidue(),
+                    null,
+                    null,
+                    feature.getDescription(),
+                    feature.getSourceDb(),
+                    feature.getSourceRef()
+            );
+            enzymeAnnotationMapper.insert(annotation);
+            EnzymeAnnotation saved = enzymeAnnotationMapper.selectById(annotation.getId());
+            existing.add(saved);
+            imported.add(saved);
+        }
+        return imported;
+    }
+
     private void saveStructure(Long enzymeId, String structureType, String structureId, String sourceDb, String sourceUrl, int isPrimary) {
         if (structureId == null || structureId.isBlank()) {
             return;
@@ -1245,6 +1318,14 @@ public class NcbiImportService {
 
     private String normalizeSequence(String sequence) {
         return defaultString(sequence).replaceAll("\\s+", "").toUpperCase();
+    }
+
+    private String normalizeStoredSequence(String sequence, String sourceType) {
+        String normalized = defaultString(sequence).replaceAll("\\s+", "").toUpperCase();
+        if ("NCBI_NUCLEOTIDE".equalsIgnoreCase(defaultString(sourceType))) {
+            return normalized.replace('T', 'U');
+        }
+        return normalized;
     }
 
     private void validateMiniFoldSaveRequest(SaveMiniFoldEnzymeRequest request) {

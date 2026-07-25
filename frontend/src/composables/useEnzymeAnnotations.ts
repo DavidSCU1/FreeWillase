@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import {
   createEnzymeAnnotation,
   deleteEnzymeAnnotation,
-  importUniProtAnnotations,
+  importAutomaticAnnotations,
   listEnzymeAnnotations,
   updateEnzymeAnnotation,
 } from '@/utils/api'
@@ -103,10 +103,10 @@ export function useEnzymeAnnotations() {
     }
   }
 
-  const importFromUniProt = async (enzymeId: number) => {
+  const importAutomatically = async (enzymeId: number) => {
     importing.value = true
     try {
-      const imported = await importUniProtAnnotations(enzymeId)
+      const imported = await importAutomaticAnnotations(enzymeId)
       if (!imported.length) {
         return imported
       }
@@ -129,6 +129,6 @@ export function useEnzymeAnnotations() {
     fetchAnnotations,
     saveAnnotation,
     removeAnnotation,
-    importFromUniProt,
+    importAutomatically,
   }
 }

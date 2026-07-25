@@ -52,6 +52,17 @@ public class EnzymeController {
                 .body(structure);
     }
 
+    @GetMapping("/{id}/sequence")
+    public ResponseEntity<String> getPrimarySequence(@PathVariable Long id) {
+        String sequence = ncbiImportService.getPrimarySequenceText(id);
+        if (sequence == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(sequence);
+    }
+
     @PostMapping("/{id}/match")
     public void matchLiterature(@PathVariable Long id, @RequestBody(required = false) MatchLiteratureRequest request) {
         String email = request != null ? request.getNcbiEmail() : null;
@@ -90,6 +101,11 @@ public class EnzymeController {
     @PostMapping("/{id}/annotations/import-uniprot")
     public List<EnzymeAnnotation> importAnnotationsFromUniProt(@PathVariable Long id) {
         return ncbiImportService.importAnnotationsFromUniProt(id);
+    }
+
+    @PostMapping("/{id}/annotations/import-auto")
+    public List<EnzymeAnnotation> importAnnotationsAutomatically(@PathVariable Long id) {
+        return ncbiImportService.importAnnotationsAutomatically(id);
     }
 
     @PostMapping("/{id}/literatures/import")
