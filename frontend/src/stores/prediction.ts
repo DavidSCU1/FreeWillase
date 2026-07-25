@@ -214,6 +214,11 @@ export const usePredictionStore = defineStore('prediction', () => {
       tasks.value = [...entries.map(entry => entry.task), ...tasks.value]
       activeTaskId.value = entries[0]?.task.id || null
 
+      // Initial terminal log
+      entries.forEach(entry => {
+        taskLogs.value[entry.task.id] = `root@freewillase:~# trrosettarna-predict --name "${entry.task.name}"\n[SYSTEM] Preparing request...`
+      })
+
       for (const entry of entries) {
         try {
           const result = await predictStructure(

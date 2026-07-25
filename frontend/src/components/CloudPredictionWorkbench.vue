@@ -255,7 +255,7 @@ function startPolling() {
     for (const task of runningTasks) {
       await store.fetchTaskResult(task)
     }
-  }, 10000) // Poll every 10 seconds
+  }, 3000) // Poll every 3 seconds for real-time feel
 }
 
 function stopPolling() {
@@ -576,49 +576,82 @@ onUnmounted(() => {
           </template>
 
           <template v-else-if="currentTask?.status === 'running'">
-            <div class="h-full min-h-[620px] flex flex-col p-8">
-              <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 mb-8">
-                <Loader2 class="animate-spin text-apple-blue" :size="36" />
-                <div class="space-y-2">
-                  <h3 class="text-lg font-bold text-apple-text">任务执行中</h3>
-                  <p class="text-sm text-apple-secondary-text">正在等待结果返回，完成后会自动切换到结果视图。</p>
-                  <a
-                    v-if="currentTask.result?.resultPageUrl"
-                    :href="currentTask.result.resultPageUrl"
-                    target="_blank"
-                    class="mt-4 inline-flex items-center gap-2 text-xs font-bold text-apple-blue hover:underline"
-                  >
-                    在 trRosettaRNA 官网查看实时进度
-                    <Sparkles :size="12" />
-                  </a>
+            <div class="h-full min-h-[620px] flex flex-col bg-[#0c0c0c] rounded-apple overflow-hidden shadow-2xl border border-white/10">
+              <!-- Terminal Header -->
+              <div class="flex items-center justify-between px-4 py-2.5 bg-[#1e1e1e] border-b border-white/5">
+                <div class="flex items-center gap-4">
+                  <div class="flex gap-2">
+                    <div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
+                    <div class="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
+                    <div class="w-3 h-3 rounded-full bg-[#27c93f]"></div>
+                  </div>
+                  <div class="flex items-center gap-2 text-white/40">
+                    <Terminal :size="14" />
+                    <span class="text-[11px] font-mono tracking-wider">FreeWillase-CLI — {{ currentTask.name }} — {{ currentTask.id.slice(0, 8) }}</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="text-[10px] font-mono text-emerald-500/80 animate-pulse">● EXECUTING</span>
+                  <div class="w-px h-3 bg-white/10"></div>
+                  <Loader2 class="animate-spin text-white/20" :size="12" />
                 </div>
               </div>
 
-              <!-- Terminal Log Area -->
-              <div v-if="currentLogs" class="w-full bg-black/90 rounded-apple overflow-hidden shadow-2xl">
-                <div class="flex items-center justify-between px-4 py-2 bg-white/10 border-b border-white/5">
-                  <div class="flex items-center gap-2">
-                    <div class="flex gap-1.5">
-                      <div class="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
-                      <div class="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
-                      <div class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
-                    </div>
-                    <span class="text-[10px] font-bold text-white/40 uppercase tracking-widest ml-2">Console Output</span>
-                  </div>
-                  <Terminal :size="12" class="text-white/40" />
-                </div>
-                <div class="p-4 h-48 overflow-y-auto font-mono text-[11px] leading-relaxed">
-                  <div v-for="(line, idx) in currentLogs.split('\n')" :key="idx" class="flex gap-3">
-                    <span class="text-white/20 select-none w-4 text-right">{{ idx + 1 }}</span>
+              <!-- Terminal Body -->
+              <div class="flex-1 p-6 overflow-y-auto font-mono text-[13px] leading-relaxed custom-scrollbar">
+                <div class="space-y-1.5">
+                  <div v-for="(line, idx) in currentLogs.split('\n')" :key="idx" class="flex gap-4 group">
+                    <span class="text-white/10 select-none w-6 text-right group-hover:text-white/30 transition-colors">{{ idx + 1 }}</span>
                     <span :class="{
-                      'text-emerald-400': line.includes('[SUCCESS]'),
-                      'text-apple-blue': line.includes('[INFO]'),
+                      'text-emerald-400 font-bold': line.includes('[SUCCESS]'),
+                      'text-sky-400': line.includes('[INFO]') || line.includes('[SYSTEM]'),
                       'text-amber-400': line.includes('[WAIT]'),
-                      'text-red-400': line.includes('[ERROR]'),
-                      'text-white/70': !line.includes('[')
-                    }">{{ line }}</span>
+                      'text-rose-400': line.includes('[ERROR]') || line.includes('[HTTP/1.1] 500') || line.includes('[HTTP/1.1] 4'),
+                      'text-purple-400 italic': line.includes('[POST]') || line.includes('[GET]'),
+                      'text-white/90': line.startsWith('root@'),
+                      'text-white/50': !line.includes('[') && !line.startsWith('root@')
+                    }" class="break-all">{{ line }}</span>
+                  </div>
+                  
+                  <!-- Animated Prompt -->
+                  <div class="flex gap-4 mt-2">
+                    <span class="text-white/10 select-none w-6 text-right">{{ currentLogs.split('\n').length + 1 }}</span>
+                    <div class="flex items-center gap-2">
+                      <span class="text-white/90">root@freewillase:~#</span>
+                      <span class="w-2 h-4 bg-emerald-500 animate-pulse"></span>
+                    </div>
+                  </div>
+                  <div class="mt-4 text-center">
+                    <p class="text-[10px] text-white/30 italic">trRosettaRNA 官方服务器通常需要 3-10 分钟完成一条序列的折叠，请耐心等待...</p>
                   </div>
                 </div>
+              </div>
+
+              <!-- Terminal Footer -->
+              <div class="px-6 py-3 bg-white/5 border-t border-white/5 flex items-center justify-between">
+                <div class="flex items-center gap-6">
+                  <div class="flex flex-col">
+                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">Engine</span>
+                    <span class="text-[11px] text-white/70 font-mono">{{ currentTask.provider }}</span>
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">Status</span>
+                    <span class="text-[11px] text-amber-500 font-mono">Running</span>
+                  </div>
+                  <div class="flex flex-col">
+                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">Uptime</span>
+                    <span class="text-[11px] text-white/70 font-mono">Real-time Polling (3s)</span>
+                  </div>
+                </div>
+                <a
+                  v-if="currentTask.result?.resultPageUrl"
+                  :href="currentTask.result.resultPageUrl"
+                  target="_blank"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded bg-white/5 border border-white/10 text-[10px] text-white/50 font-bold uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all"
+                >
+                  External Monitor
+                  <Sparkles :size="10" />
+                </a>
               </div>
             </div>
           </template>

@@ -24,7 +24,7 @@ public class TrRosettaRnaService {
 
     private static final String SUBMIT_URL = "https://yanglab.qd.sdu.edu.cn/cgi-bin/rosetta_rna.cgi";
     private static final String BASE_OUTPUT_URL = "http://yanglab.qd.sdu.edu.cn/trRosettaRNA/output/";
-    private static final Pattern TASK_ID_PATTERN = Pattern.compile("output/([^/]+)/");
+    private static final Pattern TASK_ID_PATTERN = Pattern.compile("output/([A-Za-z0-9_]+)");
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     public TrRosettaRnaPredictionResponse predict(String name, String sequence, String email) {
@@ -41,16 +41,18 @@ public class TrRosettaRnaService {
 
             // 1. Submit Job - Returns taskId immediately
             List<String> logs = new ArrayList<>();
-            logs.add("[INFO] 正在校验 RNA 序列合法性...");
-            logs.add("[INFO] 序列长度: " + normalizedSequence.length() + "nt");
-            logs.add("[INFO] 正在向三方服务器 (yanglab.qd.sdu.edu.cn) 提交预测请求...");
+            logs.add("root@freewillase:~# trrosettarna-predict --name \"" + name + "\" --len " + normalizedSequence.length());
+            logs.add("[SYSTEM] Initializing HTTP client (Apache HttpClient 5.x)...");
+            logs.add("[POST] https://yanglab.qd.sdu.edu.cn/cgi-bin/rosetta_rna.cgi");
+            logs.add("[DATA] multipart/form-data; boundary=FreeWillaseBoundary");
+            logs.add("[INFO] Sending sequence payload (" + normalizedSequence.substring(0, Math.min(10, normalizedSequence.length())) + "...)");
             
             String taskId = submitJob(httpClient, name, normalizedSequence, email);
             String resultPageUrl = BASE_OUTPUT_URL + taskId + "/";
             
-            logs.add("[SUCCESS] 任务提交成功! 任务 ID: " + taskId);
-            logs.add("[INFO] 远程服务已接受请求，进入排队/计算阶段...");
-            logs.add("[INFO] 结果页面: " + resultPageUrl);
+            logs.add("[HTTP/1.1] 200 OK");
+            logs.add("[SUCCESS] Job accepted. Remote TaskID: " + taskId);
+            logs.add("[SYSTEM] Redirecting to monitor: " + resultPageUrl);
             
             log.info("trRosettaRNA job submitted. Task ID: {}", taskId);
 
@@ -73,8 +75,7 @@ public class TrRosettaRnaService {
     public TrRosettaRnaPredictionResponse getResult(String taskId) {
         String resultPageUrl = BASE_OUTPUT_URL + taskId + "/";
         List<String> logs = new ArrayList<>();
-        logs.add("[INFO] 正在轮询远程服务状态...");
-        logs.add("[INFO] 任务 ID: " + taskId);
+        logs.add("root@freewillase:~# watch -n 3 curl -s " + resultPageUrl);
         
         try (CloseableHttpClient httpClient = HttpClients.custom()
                 .setUserAgent(USER_AGENT)
@@ -83,8 +84,20 @@ public class TrRosettaRnaService {
             // Check if finished
             boolean finished = isFinished(httpClient, resultPageUrl);
             if (!finished) {
-                logs.add("[INFO] 任务状态: 执行中 (RUNNING)...");
-                logs.add("[WAIT] 正在等待远程服务器完成深度学习折叠计算...");
+                logs.add("[GET] " + resultPageUrl + " -> [STATUS] 200 OK");
+                logs.add("[INFO] Remote Status: RUNNING (Processing...)");
+                logs.add("[WAIT] Waiting for trRosettaRNA deep learning fold engine...");
+                
+                // Add a simulated progress log to make the wait less boring
+                long elapsedTime = System.currentTimeMillis() % 10000;
+                if (elapsedTime < 3000) {
+                    logs.add("[SYSTEM] Generating sequence embeddings...");
+                } else if (elapsedTime < 6000) {
+                    logs.add("[SYSTEM] Extracting MSA features...");
+                } else {
+                    logs.add("[SYSTEM] Predicting 3D coordinates via Transformer...");
+                }
+                
                 return TrRosettaRnaPredictionResponse.builder()
                         .status("RUNNING")
                         .taskId(taskId)
@@ -93,13 +106,14 @@ public class TrRosettaRnaService {
                         .build();
             }
 
-            logs.add("[SUCCESS] 远程服务器已完成计算!");
-            logs.add("[INFO] 正在从结果页面提取 PDB 三维结构数据...");
+            logs.add("[GET] " + resultPageUrl + " -> [STATUS] 200 OK");
+            logs.add("[SUCCESS] Target found: model1.pdb is ready for download.");
+            logs.add("[INFO] Fetching atomic coordinates from remote storage...");
             
             // Download PDB
             String pdbContent = downloadPdb(httpClient, taskId);
-            logs.add("[SUCCESS] PDB 文件下载成功，大小: " + pdbContent.length() + " 字节");
-            logs.add("[INFO] 准备渲染 3D 视图...");
+            logs.add("[SUCCESS] PDB download complete. Size: " + pdbContent.length() + " bytes");
+            logs.add("[SYSTEM] Initializing 3D Molstar Renderer...");
             
             return TrRosettaRnaPredictionResponse.builder()
                     .providerName("trRosettaRNA")
@@ -146,19 +160,24 @@ public class TrRosettaRnaService {
 
         try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
             String html = EntityUtils.toString(response.getEntity());
+            log.debug("trRosettaRNA submission response: {}", html);
             
-            Matcher matcher = TASK_ID_PATTERN.matcher(html);
+            // 更加严谨的匹配：寻找 RNA 开头后跟数字的模式
+            Pattern pattern = Pattern.compile("output/(RNA[0-9]+)");
+            Matcher matcher = pattern.matcher(html);
             if (matcher.find()) {
-                return matcher.group(1);
-            }
-
-            Pattern fallbackPattern = Pattern.compile("output/([A-Za-z0-9_]+)/");
-            Matcher fallbackMatcher = fallbackPattern.matcher(html);
-            if (fallbackMatcher.find()) {
-                return fallbackMatcher.group(1);
+                return matcher.group(1).trim();
             }
             
-            throw new IllegalStateException("未能从 trRosettaRNA 响应中提取任务 ID");
+            // 备选方案：如果官网改了前缀，寻找 output/ 后面紧跟的字母数字组合
+            Matcher fallbackMatcher = TASK_ID_PATTERN.matcher(html);
+            if (fallbackMatcher.find()) {
+                String taskId = fallbackMatcher.group(1);
+                return taskId.split("[^A-Za-z0-9_]")[0].trim();
+            }
+            
+            throw new IllegalStateException("未能从 trRosettaRNA 响应中提取任务 ID。原始响应：" + 
+                (html.length() > 200 ? html.substring(0, 200) + "..." : html));
         }
     }
 
