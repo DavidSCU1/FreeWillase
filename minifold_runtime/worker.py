@@ -54,7 +54,9 @@ def collect_outputs(task_dir: Path):
         pdb_files = sorted(item for item in three_d_dir.iterdir() if item.suffix.lower() == ".pdb")
         if pdb_files:
             pdb_content = pdb_files[0].read_text(encoding="utf-8")
-    return pdb_content
+    return {
+        "pdb": pdb_content,
+    }
 
 
 def run_task(task_dir: Path, payload: dict):
@@ -62,6 +64,7 @@ def run_task(task_dir: Path, payload: dict):
 
     from modules.pipeline import run_pipeline
     from modules.env_loader import load_env
+    from modules.protein_quality_assessor import generate_quality_assessment
 
     log_path = task_dir / "process.log"
     result_path = task_dir / "result.json"
@@ -122,15 +125,20 @@ def run_task(task_dir: Path, payload: dict):
     finally:
         os.chdir(original_cwd)
 
-    pdb_content = collect_outputs(task_dir)
+    outputs = collect_outputs(task_dir)
+    pdb_content = outputs["pdb"]
     if not pdb_content:
         raise RuntimeError("Pipeline finished but no PDB structure was generated.")
+
+    quality_assessment = generate_quality_assessment(task_dir, sequence)
 
     write_result(
         result_path,
         {
             "status": "success",
             "pdb": pdb_content,
+            "qualityAssessment": quality_assessment,
+            "analysis": quality_assessment.get("summary") if quality_assessment else None,
         },
     )
     logger("==== FreeWillase MiniFold Runtime Finished ====")

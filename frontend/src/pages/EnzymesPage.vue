@@ -365,6 +365,7 @@ const selectedEnzyme = computed(() => {
 const isRnaEntry = computed(() => selectedEnzyme.value?.moleculeType === 'RNA')
 const selectedSequenceUnit = computed(() => selectedEnzyme.value?.moleculeType === 'RNA' ? 'nt' : 'aa')
 const canImportAutomaticAnnotations = computed(() => !isPredictedLibrary.value)
+const canImportUniProtAnnotations = computed(() => !isPredictedLibrary.value && !isRnaEntry.value)
 const selectedNcbiSourceLabel = computed(() => {
   if (isPredictedLibrary.value) return 'SOURCE'
   return selectedEnzyme.value?.moleculeType === 'RNA' ? 'NCBI Nucleotide' : 'NCBI Protein'

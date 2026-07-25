@@ -43,8 +43,14 @@ minifold_runtime/.env
 minifold_runtime/.env.*
 storage/
 
+# --- User-Generated Runtime Data ---
+.dbg/
+.tmp/
+tmp/
+api_output/
+logs/
+minifold_runtime/tasks/
+minifold_runtime/envs/
+
 # --- Docker ---
 .docker/
-
-# --- Runtime Logs ---
-logs/freewillase-backend.log

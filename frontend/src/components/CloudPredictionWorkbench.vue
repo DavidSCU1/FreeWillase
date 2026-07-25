@@ -267,7 +267,7 @@ async function handleSaveToLibrary() {
     savedLibraryEntry.value = await saveCloudPredictionEnzyme({
       provider: task.provider,
       name: libraryEntryName.value.trim(),
-      sequence: task.result.sequence || store.tasks.find(t => t.id === task.id)?.sequenceLength?.toString() || '', // In real app, sequence should be tracked properly
+      sequence: task.result.sequence || task.inputSequence || '',
       pdb: task.result.structure,
       taskId: task.engineTaskId || task.result.taskId,
       moleculeType: task.moleculeType
@@ -609,7 +609,7 @@ onUnmounted(() => {
                     </p>
                     <p v-if="saveToLibraryError" class="text-[11px] font-bold text-red-500">{{ saveToLibraryError }}</p>
                     <div v-if="savedLibraryEntry" class="rounded-apple border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
-                      已入库为「{{ savedLibraryEntry.name }}」，编号 {{ savedLibraryEntry.code }}。
+                      已入库为「{{ savedLibraryEntry.proteinName }}」，编号 {{ savedLibraryEntry.code }}。
                     </div>
                     <div class="flex flex-col gap-2">
                       <button

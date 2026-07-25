@@ -4,6 +4,7 @@ import { getMiniFoldResult, predictMiniFold } from '@/utils/api'
 import { normalizeSequenceInput } from '@/utils/predictionProviders'
 
 export type MiniFoldBackend = 'auto' | 'directml' | 'ipex' | 'oneapi_cpu' | 'cuda' | 'cpu'
+export type MiniFoldMoleculeType = 'protein' | 'RNA'
 
 const STORAGE_KEY = 'minifoldWorkbench'
 const RUNTIME_STATE_KEY = 'minifoldRuntimeState'
@@ -11,9 +12,41 @@ const TASK_HISTORY_KEY = 'minifoldTaskHistory'
 
 export type MiniFoldTaskStatus = 'running' | 'success' | 'error'
 
+export type MiniFoldQualityDimension = {
+  key: string
+  label: string
+  score: number
+  weight: number
+  level: string
+  description: string
+  detail: string
+}
+
+export type MiniFoldQualityAssessment = {
+  overallScore: number
+  level: string
+  summary: string
+  dimensions: MiniFoldQualityDimension[]
+  warnings: string[]
+  rawMetrics: Record<string, number | null>
+}
+
+export type MiniFoldRnaMetrics = {
+  plausibilityScore: number
+  grade: string
+  summary: string
+  topology?: Record<string, any>
+  geometry?: Record<string, number | null>
+  scores?: Record<string, number | null>
+  candidateCount?: number
+  selectedCandidate?: Record<string, any>
+  ensemble?: Record<string, any>
+}
+
 export type MiniFoldTaskRecord = {
   taskId: string
   status: MiniFoldTaskStatus
+  moleculeType: MiniFoldMoleculeType
   startedAt: number
   updatedAt: number
   sequenceLength: number
@@ -22,10 +55,12 @@ export type MiniFoldTaskRecord = {
   pythonLabel: string
   error: string | null
   structureText: string | null
+  qualityAssessment: MiniFoldQualityAssessment | null
+  resultMetrics: MiniFoldRnaMetrics | null
 }
 
 type StoredMiniFoldSettings = {
-  moleculeType?: 'protein' | 'rna'
+  moleculeType?: MiniFoldMoleculeType | 'rna'
   sequence?: string
   envText?: string
   targetChains?: number | null
@@ -40,6 +75,8 @@ type StoredMiniFoldRuntimeState = {
   error?: string | null
   taskStartedAt?: number | null
   lastStructureText?: string | null
+  qualityAssessment?: MiniFoldQualityAssessment | null
+  resultMetrics?: MiniFoldRnaMetrics | null
 }
 
 function safeParse<T>(value: string | null): T | null {
@@ -52,7 +89,7 @@ function safeParse<T>(value: string | null): T | null {
 }
 
 export const useMiniFoldStore = defineStore('minifold', () => {
-  const moleculeType = ref<'protein' | 'RNA'>('protein')
+  const moleculeType = ref<MiniFoldMoleculeType>('protein')
   const sequence = ref('')
   const envText = ref('')
   const targetChains = ref<number | null>(null)
@@ -67,6 +104,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
   const viewerUrl = ref<string | null>(null)
   const viewerFormat = ref<'pdb'>('pdb')
   const lastStructureText = ref<string | null>(null)
+  const qualityAssessment = ref<MiniFoldQualityAssessment | null>(null)
+  const resultMetrics = ref<MiniFoldRnaMetrics | null>(null)
   const taskStartedAt = ref<number | null>(null)
   const taskHistory = ref<MiniFoldTaskRecord[]>([])
 
@@ -76,6 +115,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     const saved = safeParse<StoredMiniFoldSettings>(localStorage.getItem(STORAGE_KEY))
     if (!saved) return
     if (saved.moleculeType === 'protein' || saved.moleculeType === 'RNA') moleculeType.value = saved.moleculeType
+    if (saved.moleculeType === 'rna') moleculeType.value = 'RNA'
     if (typeof saved.sequence === 'string') sequence.value = saved.sequence
     if (typeof saved.envText === 'string') envText.value = saved.envText
     if (saved.targetChains === null || typeof saved.targetChains === 'number') targetChains.value = saved.targetChains
@@ -96,6 +136,12 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     if (saved.taskStartedAt === null) taskStartedAt.value = null
     if (typeof saved.lastStructureText === 'string' && saved.lastStructureText.trim()) {
       setViewer(saved.lastStructureText)
+    }
+    if (saved.qualityAssessment) {
+      qualityAssessment.value = saved.qualityAssessment
+    }
+    if (saved.resultMetrics) {
+      resultMetrics.value = saved.resultMetrics
     }
   }
 
@@ -124,6 +170,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
       error: error.value,
       taskStartedAt: taskStartedAt.value,
       lastStructureText: lastStructureText.value,
+      qualityAssessment: qualityAssessment.value,
+      resultMetrics: resultMetrics.value,
     }))
   }
 
@@ -159,6 +207,7 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     const record: MiniFoldTaskRecord = {
       taskId: engineTaskId.value,
       status: (partial.status || status.value) as MiniFoldTaskStatus,
+      moleculeType: partial.moleculeType ?? existing?.moleculeType ?? moleculeType.value,
       startedAt: existing?.startedAt || taskStartedAt.value,
       updatedAt: Date.now(),
       sequenceLength: partial.sequenceLength ?? existing?.sequenceLength ?? sequence.value.replace(/\s+/g, '').length,
@@ -167,6 +216,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
       pythonLabel: partial.pythonLabel ?? existing?.pythonLabel ?? (condaEnvName.value.trim() || 'MINIFOLD_PYTHON / auto-discovery'),
       error: partial.error ?? existing?.error ?? error.value,
       structureText: partial.structureText ?? existing?.structureText ?? lastStructureText.value,
+      qualityAssessment: partial.qualityAssessment ?? existing?.qualityAssessment ?? qualityAssessment.value,
+      resultMetrics: partial.resultMetrics ?? existing?.resultMetrics ?? resultMetrics.value,
     }
     upsertTaskRecord(record)
   }
@@ -179,6 +230,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     status.value = task.status
     error.value = task.error
     taskStartedAt.value = task.startedAt
+    qualityAssessment.value = task.qualityAssessment
+    resultMetrics.value = task.resultMetrics
 
     if (task.structureText) {
       setViewer(task.structureText)
@@ -197,6 +250,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     taskStartedAt.value = null
     revokeViewerUrl()
     lastStructureText.value = null
+    qualityAssessment.value = null
+    resultMetrics.value = null
     persistRuntimeState()
   }
 
@@ -215,6 +270,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
 
     revokeViewerUrl()
     lastStructureText.value = null
+    qualityAssessment.value = null
+    resultMetrics.value = null
     taskStartedAt.value = Date.now()
     status.value = 'running'
     isSubmitting.value = true
@@ -239,12 +296,15 @@ export const useMiniFoldStore = defineStore('minifold', () => {
         error.value = null
         updateCurrentTaskRecord({
           status: 'running',
+          moleculeType: moleculeType.value,
           sequenceLength: normalizedSequence.length,
           targetChains: targetChains.value,
           backend: payload.backend,
           pythonLabel: payload.condaEnvName || 'MINIFOLD_PYTHON / auto-discovery',
           error: null,
           structureText: null,
+          qualityAssessment: null,
+          resultMetrics: null,
         })
         persistRuntimeState()
         console.info('[MiniFold] task submitted', {
@@ -262,10 +322,15 @@ export const useMiniFoldStore = defineStore('minifold', () => {
 
       setViewer(body.pdb)
       status.value = 'success'
+      qualityAssessment.value = body.qualityAssessment ?? null
+      resultMetrics.value = body.metrics ?? null
       updateCurrentTaskRecord({
         status: 'success',
+        moleculeType: moleculeType.value,
         error: null,
         structureText: body.pdb,
+        qualityAssessment: qualityAssessment.value,
+        resultMetrics: resultMetrics.value,
       })
       persistRuntimeState()
       return true
@@ -292,10 +357,15 @@ export const useMiniFoldStore = defineStore('minifold', () => {
       if (body?.status === 'success' && body?.pdb) {
         setViewer(body.pdb)
         status.value = 'success'
+        qualityAssessment.value = body.qualityAssessment ?? null
+        resultMetrics.value = body.metrics ?? null
         updateCurrentTaskRecord({
           status: 'success',
+          moleculeType: moleculeType.value,
           error: null,
           structureText: body.pdb,
+          qualityAssessment: qualityAssessment.value,
+          resultMetrics: resultMetrics.value,
         })
         persistRuntimeState()
         console.info('[MiniFold] task finished', { taskId: engineTaskId.value })
@@ -343,6 +413,14 @@ export const useMiniFoldStore = defineStore('minifold', () => {
   watch([engineTaskId, status, error, taskStartedAt, lastStructureText], () => {
     persistRuntimeState()
   }, { deep: true })
+ 
+  watch(qualityAssessment, () => {
+    persistRuntimeState()
+  }, { deep: true })
+
+  watch(resultMetrics, () => {
+    persistRuntimeState()
+  }, { deep: true })
 
   watch(taskHistory, () => {
     persistTaskHistory()
@@ -370,6 +448,8 @@ export const useMiniFoldStore = defineStore('minifold', () => {
     viewerUrl,
     viewerFormat,
     lastStructureText,
+    qualityAssessment,
+    resultMetrics,
     taskStartedAt,
     taskHistory,
     isSubmitting,

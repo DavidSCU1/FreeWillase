@@ -1,9 +1,0 @@
-{
-  "moleculeType" : "RNA",
-  "sequence" : "GGGCUAUUAGCUCAGUUGGUUAGAGCGCACCCCUGAUAAGGGUGAGGUCGCUGAUUCGAAUUCAGCAUAGCCCA",
-  "envText" : "",
-  "targetChains" : 4,
-  "useIgpu" : true,
-  "backend" : "directml",
-  "condaEnvName" : "D:\\Program Files (x86)\\Boost\\python.exe"
-}

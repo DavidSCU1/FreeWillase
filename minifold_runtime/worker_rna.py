@@ -49,18 +49,27 @@ def collect_outputs(task_dir: Path):
     three_d_dir = workdir / "3d_structures"
 
     pdb_content = ""
+    metrics = None
 
     if three_d_dir.exists():
         pdb_files = sorted(item for item in three_d_dir.iterdir() if item.suffix.lower() == ".pdb")
         if pdb_files:
             pdb_content = pdb_files[0].read_text(encoding="utf-8")
-    return pdb_content
+
+    metrics_files = sorted(workdir.glob("*_metrics.json"))
+    if metrics_files:
+        metrics = json.loads(metrics_files[0].read_text(encoding="utf-8"))
+
+    return {
+        "pdb": pdb_content,
+        "metrics": metrics,
+    }
 
 
 def run_task(task_dir: Path, payload: dict):
     ensure_runtime_modules_package()
 
-    from modules.pipeline import run_pipeline
+    from modules.rna_pipeline import run_pipeline
     from modules.env_loader import load_env
 
     log_path = task_dir / "process.log"
@@ -79,7 +88,7 @@ def run_task(task_dir: Path, payload: dict):
 
     sequence = (payload.get("sequence") or "").strip()
     if not sequence:
-        raise ValueError("Missing protein sequence")
+        raise ValueError("Missing RNA sequence")
 
     if sequence.startswith(">"):
         lines = sequence.splitlines()
@@ -99,7 +108,7 @@ def run_task(task_dir: Path, payload: dict):
     backend = payload.get("backend") or ("auto" if use_igpu else "cpu")
     ext_env_name = None
 
-    logger("==== FreeWillase MiniFold Runtime Started ====")
+    logger("==== FreeWillase MiniFold RNA Runtime Started ====")
     logger(f"Sequence length: {len(sequence)}")
     logger(f"Target chains: {target_chains or 'auto'}")
     logger(f"Acceleration: {'enabled' if use_igpu else 'disabled'}")
@@ -122,7 +131,8 @@ def run_task(task_dir: Path, payload: dict):
     finally:
         os.chdir(original_cwd)
 
-    pdb_content = collect_outputs(task_dir)
+    outputs = collect_outputs(task_dir)
+    pdb_content = outputs["pdb"]
     if not pdb_content:
         raise RuntimeError("Pipeline finished but no PDB structure was generated.")
 
@@ -131,6 +141,7 @@ def run_task(task_dir: Path, payload: dict):
         {
             "status": "success",
             "pdb": pdb_content,
+            "metrics": outputs["metrics"],
         },
     )
     logger("==== FreeWillase MiniFold RNA Runtime Finished ====")
@@ -147,7 +158,7 @@ def main():
     task_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        payload = json.loads(payload_path.read_text(encoding="utf-8"))
+        payload = json.loads(payload_path.read_text(encoding="utf-8-sig"))
         run_task(task_dir, payload)
     except Exception as exc:
         log_path = task_dir / "process.log"

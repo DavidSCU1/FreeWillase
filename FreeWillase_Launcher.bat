@@ -27,8 +27,22 @@ if %ERRORLEVEL% NEQ 0 (
 echo [2/5] Checking Embedded MiniFold Runtime...
 cd /d %~dp0
 set "PYTHON_CMD="
-for /f "delims=" %%i in ('where python 2^>nul') do (
-    if not defined PYTHON_CMD set "PYTHON_CMD=%%i"
+set "PROJECT_MANAGED_PYTHON=%~dp0minifold_runtime\envs\rna-conda\python.exe"
+set "PROJECT_PORTABLE_PYTHON=%~dp0minifold_runtime\python-portable\python.exe"
+set "BOOST_MANAGED_PYTHON=D:\Program Files (x86)\Boost\python.exe"
+if exist "%PROJECT_MANAGED_PYTHON%" (
+    set "PYTHON_CMD=%PROJECT_MANAGED_PYTHON%"
+)
+if not defined PYTHON_CMD if exist "%PROJECT_PORTABLE_PYTHON%" (
+    set "PYTHON_CMD=%PROJECT_PORTABLE_PYTHON%"
+)
+if not defined PYTHON_CMD if exist "%BOOST_MANAGED_PYTHON%" (
+    set "PYTHON_CMD=%BOOST_MANAGED_PYTHON%"
+)
+if not defined PYTHON_CMD (
+    for /f "delims=" %%i in ('where python 2^>nul') do (
+        if not defined PYTHON_CMD set "PYTHON_CMD=%%i"
+    )
 )
 if not defined PYTHON_CMD (
     for /f "delims=" %%i in ('where python3 2^>nul') do (

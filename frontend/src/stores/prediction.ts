@@ -201,6 +201,7 @@ export const usePredictionStore = defineStore('prediction', () => {
           provider: provider.value,
           moleculeType: moleculeType.value,
           name: record.name,
+          inputSequence: record.sequence,
           sequenceLength: record.sequence.length,
         } as PredictionTask,
       }))

@@ -23,6 +23,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PredictionService {
 
+    private static final String BOOST_MANAGED_PYTHON = "D:\\Program Files (x86)\\Boost\\python.exe";
+
     private final ObjectMapper objectMapper;
 
     public MiniFoldPredictionResponse predictWithMiniFold(MiniFoldPredictionRequest request) {
@@ -178,6 +180,11 @@ public class PredictionService {
             log.warn("Configured MINIFOLD_PYTHON is unavailable, falling back to system discovery: {}", configured);
         }
 
+        List<String> managedCommand = resolveManagedPythonCommand();
+        if (managedCommand != null) {
+            return managedCommand;
+        }
+
         List<List<String>> candidates = List.of(
                 List.of("python"),
                 List.of("python3"),
@@ -191,6 +198,31 @@ public class PredictionService {
         }
 
         throw new IllegalStateException("未找到可用的 Python 解释器，请安装 Python 或设置环境变量 MINIFOLD_PYTHON");
+    }
+
+    private List<String> resolveManagedPythonCommand() {
+        for (Path candidate : getManagedPythonCandidates()) {
+            if (candidate == null || !Files.exists(candidate)) {
+                continue;
+            }
+
+            List<String> directCommand = List.of(candidate.toString());
+            if (isPythonAvailable(directCommand)) {
+                log.info("Using managed MiniFold Python runtime: {}", candidate);
+                return directCommand;
+            }
+
+            log.warn("Managed MiniFold Python exists but is unavailable: {}", candidate);
+        }
+        return null;
+    }
+
+    private List<Path> getManagedPythonCandidates() {
+        List<Path> candidates = new ArrayList<>();
+        candidates.add(getRuntimeRoot().resolve("envs").resolve("rna-conda").resolve("python.exe"));
+        candidates.add(getRuntimeRoot().resolve("python-portable").resolve("python.exe"));
+        candidates.add(Paths.get(BOOST_MANAGED_PYTHON));
+        return candidates;
     }
 
     private List<String> resolveDirectPythonCommand(String value) {

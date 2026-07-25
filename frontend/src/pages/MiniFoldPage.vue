@@ -23,6 +23,7 @@ import {
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { useMiniFoldStore } from '@/stores/minifold'
+import type { MiniFoldBackend } from '@/stores/minifold'
 import { normalizeSequenceInput } from '@/utils/predictionProviders'
 import { getMiniFoldLogs, saveMiniFoldEnzyme } from '@/utils/api'
 import type { EnzymeEntry } from '@/types'
@@ -63,12 +64,12 @@ const targetChainOptions = [
 ]
 
 const backendOptions = [
-  { label: '自动选择', value: 'auto', hint: '优先尝试最合适的本机后端' },
-  { label: 'CUDA', value: 'cuda', hint: '优先调用 NVIDIA 独显' },
-  { label: 'DirectML', value: 'directml', hint: '统一尝试 Windows 图形设备' },
-  { label: 'IPEX', value: 'ipex', hint: '偏向 Intel XPU / Arc' },
-  { label: 'oneAPI CPU', value: 'oneapi_cpu', hint: 'Intel CPU 加速路径' },
-  { label: 'CPU', value: 'cpu', hint: '最稳妥，但速度最慢' },
+  { label: '自动选择', value: 'auto', hint: '推荐。由运行时优先尝试最合适的本机推理后端。' },
+  { label: 'DirectML', value: 'directml', hint: '优先调用 Windows 图形设备，适合核显或通用 GPU。' },
+  { label: 'IPEX', value: 'ipex', hint: '偏向 Intel XPU / Arc 路径。' },
+  { label: 'oneAPI CPU', value: 'oneapi_cpu', hint: '走 Intel CPU 优化路径，不依赖图形设备。' },
+  { label: 'CUDA', value: 'cuda', hint: '优先调用 NVIDIA 独显。' },
+  { label: 'CPU', value: 'cpu', hint: '最稳妥，但速度最慢。' },
 ] as const
 
 const selectedStructureId = computed(() => store.engineTaskId || '尚未创建')
@@ -78,10 +79,17 @@ const selectedStructureStatus = computed(() => {
   if (store.status === 'error') return '结构生成失败'
   return '等待开始'
 })
-const backendLabel = computed(() => backendOptions.find(item => item.value === store.backend)?.label || store.backend)
-const backendHint = computed(() => backendOptions.find(item => item.value === store.backend)?.hint || '')
+const selectedInferenceMode = computed(() => {
+  if (!store.useAcceleration || store.backend === 'cpu') return 'cpu'
+  return store.backend
+})
+const inferenceModeLabel = computed(() => backendOptions.find(item => item.value === selectedInferenceMode.value)?.label || selectedInferenceMode.value)
+const inferenceModeHint = computed(() => backendOptions.find(item => item.value === selectedInferenceMode.value)?.hint || '')
 const targetChainLabel = computed(() => store.targetChains ? `${store.targetChains} 条链` : '自动判断')
 const condaEnvLabel = computed(() => store.condaEnvName.trim() || '自动发现 / MINIFOLD_PYTHON')
+const isRnaMode = computed(() => store.moleculeType === 'RNA')
+const sequenceUnitLabel = computed(() => isRnaMode.value ? 'nt' : 'aa')
+const sequenceKindLabel = computed(() => isRnaMode.value ? 'RNA 序列' : '蛋白序列')
 const normalizedSequenceLength = computed(() => {
   return store.sequence
     .split(/\r?\n/)
@@ -95,7 +103,7 @@ const envLength = computed(() => store.envText.trim().length)
 const summaryItems = computed(() => [
   {
     label: '序列',
-    value: normalizedSequenceLength.value ? `${normalizedSequenceLength.value} aa` : '未填写',
+    value: normalizedSequenceLength.value ? `${normalizedSequenceLength.value} ${sequenceUnitLabel.value}` : '未填写',
   },
   {
     label: '环境描述',
@@ -106,8 +114,8 @@ const summaryItems = computed(() => [
     value: targetChainLabel.value,
   },
   {
-    label: '执行模式',
-    value: store.useAcceleration ? `加速 · ${backendLabel.value}` : 'CPU',
+    label: '推理模式',
+    value: inferenceModeLabel.value,
   },
   {
     label: 'Python 环境',
@@ -118,7 +126,7 @@ const readinessItems = computed(() => [
   {
     label: '输入序列',
     done: normalizedSequenceLength.value > 0,
-    hint: normalizedSequenceLength.value > 0 ? `${normalizedSequenceLength.value} aa` : '必填',
+    hint: normalizedSequenceLength.value > 0 ? `${normalizedSequenceLength.value} ${sequenceUnitLabel.value}` : '必填',
   },
   {
     label: '环境描述',
@@ -128,7 +136,7 @@ const readinessItems = computed(() => [
   {
     label: '执行配置',
     done: true,
-    hint: `${targetChainLabel.value} · ${store.useAcceleration ? backendLabel.value : 'CPU'} · ${store.condaEnvName.trim() || '自动环境'}`,
+    hint: `${targetChainLabel.value} · ${inferenceModeLabel.value} · ${store.condaEnvName.trim() || '自动环境'}`,
   },
 ])
 const runtimeLogLines = computed(() => runtimeLog.value.split(/\r?\n/).filter(Boolean))
@@ -269,6 +277,45 @@ const statusMeta = computed(() => {
     chipClass: 'bg-apple-background text-apple-secondary-text',
   }
 })
+const qualityAssessment = computed(() => store.qualityAssessment)
+const resultMetrics = computed(() => store.resultMetrics)
+const qualityDimensions = computed(() => qualityAssessment.value?.dimensions || [])
+const qualityWarnings = computed(() => qualityAssessment.value?.warnings || [])
+const qualityScoreLabel = computed(() => {
+  const score = qualityAssessment.value?.overallScore
+  return typeof score === 'number' ? String(score) : '--'
+})
+const qualityLevelClass = computed(() => {
+  const score = qualityAssessment.value?.overallScore ?? 0
+  if (score >= 85) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+  if (score >= 72) return 'bg-apple-blue/10 text-apple-blue'
+  if (score >= 58) return 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
+  return 'bg-red-500/10 text-red-500'
+})
+const rnaMetricCards = computed(() => {
+  if (!resultMetrics.value?.scores) return []
+  const labelMap: Record<string, string> = {
+    backbone: '主链',
+    pairing: '配对',
+    clash: '碰撞',
+    smoothness: '平滑',
+    stacking: '堆叠',
+    compactness: '紧凑',
+    pairSupport: '支持度',
+  }
+  return Object.entries(resultMetrics.value.scores)
+    .map(([key, value]) => ({
+      key,
+      label: labelMap[key] || key,
+      score: typeof value === 'number' ? value : 0,
+    }))
+    .sort((a, b) => b.score - a.score)
+})
+const resultHeadline = computed(() => {
+  if (qualityAssessment.value) return '质量评分'
+  if (resultMetrics.value) return 'RNA 合理性评分'
+  return '执行概况'
+})
 const suggestedLibraryName = computed(() => {
   const header = store.sequence
     .split(/\r?\n/)
@@ -279,6 +326,17 @@ const suggestedLibraryName = computed(() => {
 
   return header || `MiniFold 预测 ${selectedStructureId.value}`
 })
+
+function getQualityTrackClass(score: number) {
+  if (score >= 85) return 'bg-emerald-500'
+  if (score >= 72) return 'bg-apple-blue'
+  if (score >= 58) return 'bg-amber-500'
+  return 'bg-red-500'
+}
+
+function formatMetricNumber(value: number | null | undefined, digits = 2) {
+  return typeof value === 'number' ? value.toFixed(digits) : '--'
+}
 
 function fillExample() {
   store.sequence = store.moleculeType === 'protein' ? `>sample_1
@@ -397,6 +455,16 @@ function downloadStructure() {
 function updateTargetChains(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   store.targetChains = value ? Number(value) : null
+}
+
+function selectInferenceMode(mode: string) {
+  if (mode === 'cpu') {
+    store.useAcceleration = false
+    store.backend = 'cpu'
+    return
+  }
+  store.useAcceleration = true
+  store.backend = mode as MiniFoldBackend
 }
 
 async function activateTask(taskId: string) {
@@ -632,7 +700,7 @@ onUnmounted(() => {
                 <div class="min-w-0">
                   <p class="text-sm font-bold text-apple-text">#{{ activeTaskCard.taskId }}</p>
                   <p class="mt-1 text-[11px] text-apple-secondary-text">
-                    {{ activeTaskCard.sequenceLength }} aa · {{ activeTaskCard.targetChains ? `${activeTaskCard.targetChains} 条链` : '自动链数' }}
+                    {{ activeTaskCard.sequenceLength }} {{ activeTaskCard.moleculeType === 'RNA' ? 'nt' : 'aa' }} · {{ activeTaskCard.targetChains ? `${activeTaskCard.targetChains} 条链` : '自动链数' }}
                   </p>
                 </div>
                 <span class="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-widest" :class="activeTaskCard.badgeClass">
@@ -672,7 +740,7 @@ onUnmounted(() => {
                       </span>
                     </div>
                     <p class="text-[11px] text-apple-secondary-text">
-                      {{ task.sequenceLength }} aa · {{ task.targetChains ? `${task.targetChains} 条链` : '自动链数' }} · {{ task.backend }}
+                      {{ task.sequenceLength }} {{ task.moleculeType === 'RNA' ? 'nt' : 'aa' }} · {{ task.targetChains ? `${task.targetChains} 条链` : '自动链数' }} · {{ task.backend }}
                     </p>
                     <p class="truncate text-[11px] text-apple-secondary-text">
                       {{ task.error || task.pythonLabel }}
@@ -745,7 +813,7 @@ onUnmounted(() => {
                 </div>
                 <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
                   <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">格式要求</p>
-                  <p class="mt-1 text-sm font-semibold text-apple-text">单条蛋白序列</p>
+                  <p class="mt-1 text-sm font-semibold text-apple-text">单条{{ sequenceKindLabel }}</p>
                 </div>
               </div>
 
@@ -756,7 +824,7 @@ onUnmounted(() => {
                   class="apple-input min-h-[220px] text-xs font-mono leading-relaxed p-4 bg-apple-background/50 focus:bg-white dark:focus:bg-white/5"
                   placeholder=">sample_1&#10;MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK"
                 />
-                <p class="text-[11px] text-apple-secondary-text">建议直接粘贴单条目标蛋白序列，避免把多条链一起放入这里。</p>
+                <p class="text-[11px] text-apple-secondary-text">建议直接粘贴单条目标{{ sequenceKindLabel }}，避免把多条分子一起放入这里。</p>
               </div>
             </div>
 
@@ -824,7 +892,7 @@ onUnmounted(() => {
                 <div>
                   <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 3</p>
                   <h3 class="text-sm font-bold text-apple-text">确认执行配置</h3>
-                  <p class="text-[11px] text-apple-secondary-text">这里既支持填写 Conda 环境名，也支持直接填写 Python 可执行文件路径，再决定是否加速和后端。</p>
+                  <p class="text-[11px] text-apple-secondary-text">这里既支持填写 Conda 环境名，也支持直接填写 Python 可执行文件路径，并把推理模式的选择权直接交给用户。</p>
                 </div>
               </div>
 
@@ -842,35 +910,42 @@ onUnmounted(() => {
                 <p class="text-[11px] text-apple-secondary-text">留空时继续使用 `MINIFOLD_PYTHON` 或系统 Python；填环境名会执行 `conda run -n 环境名 python`，填 `.exe` / 路径则直接调用该解释器。</p>
               </div>
 
-              <div v-if="store.moleculeType === 'protein'">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-                  <button
-                    type="button"
-                    class="rounded-apple border p-4 text-left transition-all"
-                    :class="store.useAcceleration ? 'border-apple-blue/40 bg-apple-blue/5' : 'border-apple-border bg-apple-background/40'"
-                    @click="store.useAcceleration = true"
-                  >
-                    <p class="text-xs font-bold text-apple-text">启用加速</p>
-                    <p class="mt-1 text-[11px] text-apple-secondary-text">尝试使用本机显卡或特定后端进行折叠。</p>
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-apple border p-4 text-left transition-all"
-                    :class="!store.useAcceleration ? 'border-apple-blue/40 bg-apple-blue/5' : 'border-apple-border bg-apple-background/40'"
-                    @click="store.useAcceleration = false"
-                  >
-                    <p class="text-xs font-bold text-apple-text">仅 CPU</p>
-                    <p class="mt-1 text-[11px] text-apple-secondary-text">禁用显卡后端，走最稳妥的 CPU 路线。</p>
-                  </button>
-                </div>
-
-                <div class="space-y-2 mt-4">
-                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">后端类型</label>
-                  <select v-model="store.backend" class="apple-input text-xs" :disabled="!store.useAcceleration">
-                    <option v-for="item in backendOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-                  </select>
+              <div class="space-y-4 mt-6">
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">推理模式</label>
+                    <span class="text-[10px] font-bold text-apple-secondary-text">{{ inferenceModeLabel }}</span>
+                  </div>
+                  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <button
+                      v-for="item in backendOptions"
+                      :key="item.value"
+                      type="button"
+                      class="rounded-apple border p-4 text-left transition-all"
+                      :class="selectedInferenceMode === item.value
+                        ? 'border-apple-blue/40 bg-apple-blue/5 shadow-sm'
+                        : 'border-apple-border bg-apple-background/40 hover:bg-apple-background/60'"
+                      @click="selectInferenceMode(item.value)"
+                    >
+                      <div class="flex items-center justify-between gap-3">
+                        <p class="text-xs font-bold text-apple-text">{{ item.label }}</p>
+                        <span
+                          class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest"
+                          :class="selectedInferenceMode === item.value
+                            ? 'bg-apple-blue text-white'
+                            : 'bg-apple-background text-apple-secondary-text'"
+                        >
+                          {{ selectedInferenceMode === item.value ? '当前' : '可选' }}
+                        </span>
+                      </div>
+                      <p class="mt-2 text-[11px] leading-relaxed text-apple-secondary-text">{{ item.hint }}</p>
+                    </button>
+                  </div>
                   <p class="text-[11px] text-apple-secondary-text">
-                    {{ backendHint }}
+                    {{ inferenceModeHint }}
+                    <span v-if="store.moleculeType === 'RNA'">
+                      当前 RNA 链路会保留这个选择并传给运行时，后续本地几何加速也会继续沿用这套入口。
+                    </span>
                   </p>
                 </div>
               </div>
@@ -883,7 +958,7 @@ onUnmounted(() => {
                 <div class="grid gap-3 md:grid-cols-4">
                   <div class="text-[11px] text-apple-secondary-text">
                     <p class="font-bold text-apple-text">输入</p>
-                    <p class="mt-1">{{ normalizedSequenceLength || 0 }} aa</p>
+                    <p class="mt-1">{{ normalizedSequenceLength || 0 }} {{ sequenceUnitLabel }}</p>
                   </div>
                   <div class="text-[11px] text-apple-secondary-text">
                     <p class="font-bold text-apple-text">约束</p>
@@ -894,8 +969,8 @@ onUnmounted(() => {
                     <p class="mt-1">{{ condaEnvLabel }}</p>
                   </div>
                   <div class="text-[11px] text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">运行方式</p>
-                    <p class="mt-1">{{ store.useAcceleration ? backendLabel : 'CPU' }}</p>
+                    <p class="font-bold text-apple-text">推理模式</p>
+                    <p class="mt-1">{{ inferenceModeLabel }}</p>
                   </div>
                 </div>
               </div>
@@ -970,7 +1045,7 @@ onUnmounted(() => {
 
               <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3 text-[11px] leading-relaxed text-apple-secondary-text">
                 <p><span class="font-bold text-apple-text">任务 ID：</span>{{ selectedStructureId }}</p>
-                <p class="mt-1"><span class="font-bold text-apple-text">后端：</span>{{ store.useAcceleration ? backendLabel : 'CPU' }}</p>
+                <p class="mt-1"><span class="font-bold text-apple-text">推理模式：</span>{{ inferenceModeLabel }}</p>
                 <p class="mt-1"><span class="font-bold text-apple-text">Python：</span>{{ condaEnvLabel }}</p>
                 <p class="mt-1"><span class="font-bold text-apple-text">链数：</span>{{ targetChainLabel }}</p>
               </div>
@@ -1174,7 +1249,7 @@ onUnmounted(() => {
               <div>
                 <h3 class="text-sm font-bold text-apple-text">MiniFold 结果</h3>
                 <p class="text-[10px] text-apple-secondary-text uppercase tracking-widest font-bold">
-                  {{ store.targetChains || 'Auto' }} chains • {{ store.useAcceleration ? store.backend : 'cpu' }}
+                  {{ store.targetChains || 'Auto' }} chains • {{ inferenceModeLabel }}
                 </p>
               </div>
             </div>
@@ -1224,12 +1299,118 @@ onUnmounted(() => {
             </div>
 
             <div class="p-6 space-y-6 bg-apple-background/10">
+              <div v-if="qualityAssessment || resultMetrics" class="space-y-3">
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">{{ resultHeadline }}</label>
+                <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 p-4 space-y-4">
+                  <template v-if="qualityAssessment">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <p class="text-2xl font-bold text-apple-text">{{ qualityScoreLabel }}</p>
+                        <p class="mt-1 text-[11px] leading-relaxed text-apple-secondary-text">
+                          {{ qualityAssessment.summary }}
+                        </p>
+                      </div>
+                      <span class="inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest" :class="qualityLevelClass">
+                        {{ qualityAssessment.level }}
+                      </span>
+                    </div>
+
+                    <div class="space-y-3">
+                      <div
+                        v-for="dimension in qualityDimensions"
+                        :key="dimension.key"
+                        class="space-y-1.5"
+                      >
+                        <div class="flex items-center justify-between gap-3 text-[11px]">
+                          <div>
+                            <p class="font-semibold text-apple-text">{{ dimension.label }}</p>
+                            <p class="text-apple-secondary-text">{{ dimension.detail }}</p>
+                          </div>
+                          <span class="font-bold text-apple-text">{{ dimension.score }}</span>
+                        </div>
+                        <div class="h-2 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
+                          <div
+                            class="h-full rounded-full transition-all"
+                            :class="getQualityTrackClass(dimension.score)"
+                            :style="{ width: `${dimension.score}%` }"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-if="qualityWarnings.length" class="rounded-[20px] border border-amber-500/20 bg-amber-500/5 px-3 py-3 space-y-1.5">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-300">复核提醒</p>
+                      <p
+                        v-for="warning in qualityWarnings"
+                        :key="warning"
+                        class="text-[11px] leading-relaxed text-amber-700 dark:text-amber-200"
+                      >
+                        {{ warning }}
+                      </p>
+                    </div>
+                  </template>
+
+                  <template v-else-if="resultMetrics">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <p class="text-2xl font-bold text-apple-text">{{ formatMetricNumber(resultMetrics.plausibilityScore, 2) }}</p>
+                        <p class="mt-1 text-[11px] leading-relaxed text-apple-secondary-text">
+                          {{ resultMetrics.summary }}
+                        </p>
+                      </div>
+                      <span class="inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest" :class="getQualityTrackClass(resultMetrics.plausibilityScore)">
+                        {{ resultMetrics.grade }}
+                      </span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">候选</p>
+                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ resultMetrics.selectedCandidate?.type || 'RNA' }}</p>
+                      </div>
+                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">支持度</p>
+                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ formatMetricNumber(resultMetrics.geometry?.pairSupportMean, 3) }}</p>
+                      </div>
+                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">配对数</p>
+                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ resultMetrics.topology?.pairCount ?? '--' }}</p>
+                      </div>
+                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
+                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">回转半径</p>
+                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ formatMetricNumber(resultMetrics.geometry?.radiusOfGyration, 2) }} A</p>
+                      </div>
+                    </div>
+
+                    <div class="space-y-3">
+                      <div
+                        v-for="dimension in rnaMetricCards"
+                        :key="dimension.key"
+                        class="space-y-1.5"
+                      >
+                        <div class="flex items-center justify-between gap-3 text-[11px]">
+                          <p class="font-semibold text-apple-text">{{ dimension.label }}</p>
+                          <span class="font-bold text-apple-text">{{ formatMetricNumber(dimension.score, 1) }}</span>
+                        </div>
+                        <div class="h-2 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
+                          <div
+                            class="h-full rounded-full transition-all"
+                            :class="getQualityTrackClass(dimension.score)"
+                            :style="{ width: `${dimension.score}%` }"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
               <div class="space-y-2">
                 <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">执行概况</label>
                 <div class="rounded-apple border border-apple-border bg-white/50 dark:bg-white/5 p-3 text-[11px] text-apple-secondary-text leading-relaxed">
                   <p>Python: {{ condaEnvLabel }}</p>
-                  <p>后端: {{ store.useAcceleration ? backendLabel : 'CPU' }}</p>
-                  <p>加速: {{ store.useAcceleration ? '启用' : '关闭' }}</p>
+                  <p>推理模式: {{ inferenceModeLabel }}</p>
+                  <p>图形加速: {{ selectedInferenceMode === 'cpu' ? '关闭' : '启用' }}</p>
                   <p>链数: {{ store.targetChains || '自动' }}</p>
                   <p class="mt-2">环境描述: {{ envLength ? `${envLength} 字` : '未填写' }}</p>
                 </div>

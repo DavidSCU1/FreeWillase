@@ -132,6 +132,7 @@ export interface PredictionTask {
   provider: PredictionProvider
   moleculeType: MoleculeType
   name: string
+  inputSequence?: string
   sequenceLength?: number
   error?: string
   result?: PredictionResult
