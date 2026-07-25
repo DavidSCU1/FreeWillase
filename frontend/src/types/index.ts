@@ -69,7 +69,7 @@ export interface LiteratureRecord {
   savedToLibrary?: boolean
 }
 
-export type PredictionProvider = 'nvidia' | 'rnafold' | 'minifold'
+export type PredictionProvider = 'nvidia' | 'rnafold' | 'minifold' | 'trrosettarna'
 
 export type MoleculeType = 'protein' | 'RNA' | 'DNA'
 

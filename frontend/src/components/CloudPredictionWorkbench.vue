@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity,
@@ -13,6 +13,7 @@ import {
   Microscope,
   Settings,
   Sparkles,
+  Terminal,
   Trash2,
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
@@ -20,7 +21,7 @@ import { usePredictionStore } from '@/stores/prediction'
 import type { PredictionProvider, PredictionTask } from '@/types'
 
 const props = defineProps<{
-  provider: Extract<PredictionProvider, 'nvidia' | 'rnafold'>
+  provider: Extract<PredictionProvider, 'nvidia' | 'rnafold' | 'trrosettarna'>
 }>()
 
 const router = useRouter()
@@ -46,6 +47,25 @@ const providerMeta = computed(() => {
     }
   }
 
+  if (props.provider === 'trrosettarna') {
+    return {
+      title: 'trRosettaRNA 工作台',
+      description: '单条 RNA 三维结构预测，通过深度学习模拟折叠。支持 400nt 以内序列。',
+      providerLabel: 'trRosettaRNA',
+      inputLabel: '输入 RNA 序列',
+      inputHint: '支持单条 FASTA (≤ 400nt)。由于模拟网页请求，预测可能需要数分钟，请耐心等待。',
+      inputPlaceholder: '>sample_rna\nGGCUCGUGGCGAAAGGGUA...',
+      example: '>sample_rna\nGGCUCGUGGCGAAAGGGUA',
+      typeLabel: 'RNA',
+      modeLabel: '单条',
+      modelLabel: 'trRosettaRNA',
+      needsApiKey: false,
+      apiHint: '通过系统后端模拟 HttpClient 请求，无需 API Key，但受上游网站限流影响。',
+      resultLabel: '三维结构结果',
+      summarySuffix: 'nt',
+    }
+  }
+
   return {
     title: 'NVIDIA ESMFold 工作台',
     description: '专门处理单条蛋白结构预测，聚焦模型、凭证、输入序列和三维结构结果。',
@@ -67,6 +87,10 @@ const providerMeta = computed(() => {
 const providerTasks = computed(() => store.tasks.filter(task => task.provider === props.provider))
 const pendingCount = computed(() => providerTasks.value.filter(task => task.status === 'running').length)
 const currentTask = computed(() => store.activeTask?.provider === props.provider ? store.activeTask : null)
+const currentLogs = computed(() => {
+  if (!currentTask.value) return ''
+  return store.taskLogs[currentTask.value.id] || ''
+})
 const hasInput = computed(() => store.sequence.trim().length > 0)
 const normalizedInputLength = computed(() => {
   return store.sequence
@@ -167,7 +191,7 @@ function ensureProviderTaskSelected(tasks: PredictionTask[]) {
 function fillExample() {
   store.sequence = providerMeta.value.example
   if (!store.name.trim()) {
-    store.name = props.provider === 'rnafold' ? 'RNA sample' : 'Protein sample'
+    store.name = (props.provider === 'rnafold' || props.provider === 'trrosettarna') ? 'RNA sample' : 'Protein sample'
   }
 }
 
@@ -212,10 +236,51 @@ watch(providerTasks, tasks => {
   ensureProviderTaskSelected(tasks)
 }, { deep: true, immediate: true })
 
+watch(() => store.sequence, () => {
+  if (store.error && (store.error.includes('序列格式不合法') || store.error.includes('非法字符'))) {
+    store.error = null
+  }
+})
+
+let pollInterval: any = null
+
+function startPolling() {
+  if (pollInterval) return
+  pollInterval = setInterval(async () => {
+    const runningTasks = providerTasks.value.filter(t => t.status === 'running')
+    if (runningTasks.length === 0) {
+      stopPolling()
+      return
+    }
+    for (const task of runningTasks) {
+      await store.fetchTaskResult(task)
+    }
+  }, 10000) // Poll every 10 seconds
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}
+
+watch(pendingCount, (count) => {
+  if (count > 0) {
+    startPolling()
+  } else {
+    stopPolling()
+  }
+}, { immediate: true })
+
 onMounted(() => {
   applyProviderDefaults()
   store.error = null
   ensureProviderTaskSelected(providerTasks.value)
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 
@@ -452,7 +517,7 @@ onMounted(() => {
                   :format="store.viewerFormat === 'mmcif' ? 'mmcif' : 'pdb'"
                   class="w-full h-full"
                 />
-                <div v-else-if="store.viewerFormat === 'dot-bracket' && store.lastStructureText" class="h-full p-6 overflow-auto bg-apple-background/30">
+                <div v-else-if="(store.viewerFormat === 'dot-bracket' || !store.viewerUrl) && store.lastStructureText" class="h-full p-6 overflow-auto bg-apple-background/30">
                   <pre class="text-xs font-mono text-apple-text whitespace-pre-wrap">{{ store.lastStructureText }}</pre>
                 </div>
                 <div v-else class="flex flex-col items-center justify-center h-full text-apple-secondary-text gap-4">
@@ -488,14 +553,72 @@ onMounted(() => {
                 </div>
               </div>
             </div>
+
+            <!-- Terminal Log for Success State -->
+            <div v-if="currentLogs" class="border-t border-apple-border bg-black/95">
+              <div class="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/5">
+                <span class="text-[9px] font-bold text-white/30 uppercase tracking-widest">Execution Logs</span>
+                <Terminal :size="10" class="text-white/30" />
+              </div>
+              <div class="p-3 max-h-32 overflow-y-auto font-mono text-[10px] leading-tight">
+                <div v-for="(line, idx) in currentLogs.split('\n')" :key="idx" class="flex gap-2">
+                  <span class="text-white/10 select-none w-3 text-right">{{ idx + 1 }}</span>
+                  <span :class="{
+                    'text-emerald-500/80': line.includes('[SUCCESS]'),
+                    'text-apple-blue/80': line.includes('[INFO]'),
+                    'text-amber-500/80': line.includes('[WAIT]'),
+                    'text-red-500/80': line.includes('[ERROR]'),
+                    'text-white/50': !line.includes('[')
+                  }">{{ line }}</span>
+                </div>
+              </div>
+            </div>
           </template>
 
           <template v-else-if="currentTask?.status === 'running'">
-            <div class="h-full min-h-[620px] flex flex-col items-center justify-center text-center gap-4 p-12">
-              <Loader2 class="animate-spin text-apple-blue" :size="36" />
-              <div class="space-y-2">
-                <h3 class="text-lg font-bold text-apple-text">任务执行中</h3>
-                <p class="text-sm text-apple-secondary-text">正在等待结果返回，完成后会自动切换到结果视图。</p>
+            <div class="h-full min-h-[620px] flex flex-col p-8">
+              <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 mb-8">
+                <Loader2 class="animate-spin text-apple-blue" :size="36" />
+                <div class="space-y-2">
+                  <h3 class="text-lg font-bold text-apple-text">任务执行中</h3>
+                  <p class="text-sm text-apple-secondary-text">正在等待结果返回，完成后会自动切换到结果视图。</p>
+                  <a
+                    v-if="currentTask.result?.resultPageUrl"
+                    :href="currentTask.result.resultPageUrl"
+                    target="_blank"
+                    class="mt-4 inline-flex items-center gap-2 text-xs font-bold text-apple-blue hover:underline"
+                  >
+                    在 trRosettaRNA 官网查看实时进度
+                    <Sparkles :size="12" />
+                  </a>
+                </div>
+              </div>
+
+              <!-- Terminal Log Area -->
+              <div v-if="currentLogs" class="w-full bg-black/90 rounded-apple overflow-hidden shadow-2xl">
+                <div class="flex items-center justify-between px-4 py-2 bg-white/10 border-b border-white/5">
+                  <div class="flex items-center gap-2">
+                    <div class="flex gap-1.5">
+                      <div class="w-2.5 h-2.5 rounded-full bg-red-500/80"></div>
+                      <div class="w-2.5 h-2.5 rounded-full bg-amber-500/80"></div>
+                      <div class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></div>
+                    </div>
+                    <span class="text-[10px] font-bold text-white/40 uppercase tracking-widest ml-2">Console Output</span>
+                  </div>
+                  <Terminal :size="12" class="text-white/40" />
+                </div>
+                <div class="p-4 h-48 overflow-y-auto font-mono text-[11px] leading-relaxed">
+                  <div v-for="(line, idx) in currentLogs.split('\n')" :key="idx" class="flex gap-3">
+                    <span class="text-white/20 select-none w-4 text-right">{{ idx + 1 }}</span>
+                    <span :class="{
+                      'text-emerald-400': line.includes('[SUCCESS]'),
+                      'text-apple-blue': line.includes('[INFO]'),
+                      'text-amber-400': line.includes('[WAIT]'),
+                      'text-red-400': line.includes('[ERROR]'),
+                      'text-white/70': !line.includes('[')
+                    }">{{ line }}</span>
+                  </div>
+                </div>
               </div>
             </div>
           </template>

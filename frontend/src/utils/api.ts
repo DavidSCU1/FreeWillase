@@ -248,6 +248,19 @@ export function predictRnaFold(payload: RnaFoldRequest) {
   })
 }
 
+export function predictTrRosettaRna(payload: { name: string, sequence: string, email?: string }) {
+  return request<any>('/api/prediction/trrosettarna', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function getTrRosettaRnaResult(taskId: string) {
+  return request<any>(`/api/prediction/trrosettarna/result/${taskId}`, {
+    method: 'GET',
+  })
+}
+
 export function predictMiniFold(payload: any) {
   return request<any>('/api/prediction/minifold', {
     method: 'POST',

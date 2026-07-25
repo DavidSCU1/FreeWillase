@@ -31,6 +31,15 @@ const workbenches = [
     accent: 'from-emerald-500/10 to-teal-500/10',
   },
   {
+    key: 'trrosettarna',
+    title: 'trRosettaRNA',
+    description: 'RNA 三维结构预测，通过网页接口模拟实现长序列的深度学习折叠。',
+    route: '/prediction/trrosettarna',
+    badge: 'RNA 3D Structure',
+    points: ['支持 400nt 以内 RNA', '模拟浏览器会话提交', '返回 PDB 三维结构文件'],
+    accent: 'from-orange-500/10 to-red-500/10',
+  },
+  {
     key: 'minifold',
     title: 'MiniFold',
     description: '本地推理工作台，处理链数、环境描述、加速后端和结构结果展示。',
@@ -58,18 +67,18 @@ const workbenches = [
           </div>
 
           <p class="max-w-2xl text-sm leading-relaxed text-apple-secondary-text">
-            现在预测模块只保留 3 个独立页面：`NVIDIA ESMFold`、`RNAfold` 和 `MiniFold`。每个页面都只处理自己的输入规则、执行流程和结果展示，避免不同模型混在一起。
+            现在预测模块只保留 4 个独立页面：`NVIDIA ESMFold`、`RNAfold`、`trRosettaRNA` 和 `MiniFold`。每个页面都只 handle 自己的输入规则、执行流程和结果展示。
           </p>
         </div>
 
-        <div class="grid grid-cols-3 gap-3 lg:min-w-[360px]">
+        <div class="grid grid-cols-4 gap-3 lg:min-w-[480px]">
           <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3">
             <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">工作台数</p>
-            <p class="mt-1 text-sm font-semibold text-apple-text">3</p>
+            <p class="mt-1 text-sm font-semibold text-apple-text">4</p>
           </div>
           <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3">
             <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">云端</p>
-            <p class="mt-1 text-sm font-semibold text-apple-text">2</p>
+            <p class="mt-1 text-sm font-semibold text-apple-text">3</p>
           </div>
           <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3">
             <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">本地</p>

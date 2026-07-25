@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { MoleculeType, PredictionProvider, PredictionTask } from '@/types'
 import { getSupportedModels, getSupportedMoleculeTypes, normalizeSequenceInput, parseSequenceRecords, predictStructure } from '@/utils/predictionProviders'
-import { getMiniFoldLogs, getMiniFoldResult } from '@/utils/api'
+import { getMiniFoldLogs, getMiniFoldResult, getTrRosettaRnaResult } from '@/utils/api'
 
 type StoredSettings = {
   provider: PredictionProvider
@@ -32,7 +32,7 @@ function makeTaskId() {
 }
 
 function isSupportedProvider(value: unknown): value is PredictionProvider {
-  return value === 'nvidia' || value === 'rnafold' || value === 'minifold'
+  return value === 'nvidia' || value === 'rnafold' || value === 'minifold' || value === 'trrosettarna'
 }
 
 export const usePredictionStore = defineStore('prediction', () => {
@@ -126,43 +126,34 @@ export const usePredictionStore = defineStore('prediction', () => {
     } else if (!models.includes(model.value)) {
       model.value = models[0]
     }
-    if (provider.value === 'minifold') {
-      provider.value = 'nvidia'
-    }
-    if (submitMode.value !== 'single' && provider.value === 'nvidia') {
+    if (submitMode.value !== 'single' && (provider.value === 'nvidia' || provider.value === 'rnafold' || provider.value === 'trrosettarna')) {
       submitMode.value = 'single'
     }
-    if (submitMode.value !== 'single' && provider.value === 'rnafold') {
-      submitMode.value = 'single'
-    }
-    if (provider.value === 'rnafold') {
+    if (provider.value === 'rnafold' || provider.value === 'trrosettarna') {
       moleculeType.value = 'RNA'
       submitMode.value = 'single'
       baseUrl.value = ''
     }
   }
 
+  // Force molecule type for RNA providers
+  watch(provider, (newProvider) => {
+    if (newProvider === 'rnafold' || newProvider === 'trrosettarna') {
+      moleculeType.value = 'RNA'
+    }
+  }, { immediate: true })
+
   async function submit() {
     error.value = null
     
-    if (provider.value === 'nvidia' && submitMode.value !== 'single') {
-      error.value = 'NVIDIA ESMFold 由于模型限制仅支持单条提交'
-      return
+    // Extra safety: ensure molecule type is correct before processing
+    if (provider.value === 'rnafold' || provider.value === 'trrosettarna') {
+      moleculeType.value = 'RNA'
     }
 
-    if (provider.value === 'rnafold') {
-      if (moleculeType.value !== 'RNA') {
-        error.value = 'RNAfold 仅支持 RNA 序列预测'
-        return
-      }
-      if (submitMode.value !== 'single') {
-        error.value = 'RNAfold 当前仅支持单条提交'
-        return
-      }
-    }
-
-    let preparedSequence = sequence.value
+    let preparedSequence = ''
     let batchRecords: Array<{ name: string, sequence: string }> = []
+
     try {
       if (submitMode.value === 'batch') {
         const records = parseSequenceRecords(sequence.value, moleculeType.value)
@@ -178,6 +169,26 @@ export const usePredictionStore = defineStore('prediction', () => {
     } catch (e: any) {
       error.value = e?.message || '序列格式错误'
       return
+    }
+
+    if (provider.value === 'nvidia' && submitMode.value !== 'single') {
+      error.value = 'NVIDIA ESMFold 由于模型限制仅支持单条提交'
+      return
+    }
+
+    if (provider.value === 'rnafold' || provider.value === 'trrosettarna') {
+      if (moleculeType.value !== 'RNA') {
+        error.value = `${provider.value === 'rnafold' ? 'RNAfold' : 'trRosettaRNA'} 仅支持 RNA 序列预测`
+        return
+      }
+      if (submitMode.value !== 'single') {
+        error.value = `${provider.value === 'rnafold' ? 'RNAfold' : 'trRosettaRNA'} 当前仅支持单条提交`
+        return
+      }
+      if (provider.value === 'trrosettarna' && preparedSequence.length > 400) {
+        error.value = 'trRosettaRNA 网页版仅支持长度 ≤ 400nt 的序列'
+        return
+      }
     }
 
     isSubmitting.value = true
@@ -222,6 +233,10 @@ export const usePredictionStore = defineStore('prediction', () => {
 
           if (result.taskId && (result as any).status === 'running') {
             entry.task.engineTaskId = result.taskId
+            // Update logs for trrosettarna if available
+            if (entry.task.provider === 'trrosettarna' && (result as any).logs) {
+              taskLogs.value[entry.task.id] = (result as any).logs.join('\n')
+            }
             // For async tasks, we don't mark as success yet
             continue 
           }
@@ -284,6 +299,35 @@ export const usePredictionStore = defineStore('prediction', () => {
   async function fetchTaskResult(task: PredictionTask) {
     if (!task.engineTaskId) return
     try {
+      if (task.provider === 'trrosettarna') {
+        const body = await getTrRosettaRnaResult(task.engineTaskId)
+        
+        // Update logs if available
+        if (body.logs && Array.isArray(body.logs)) {
+          taskLogs.value[task.id] = body.logs.join('\n')
+        }
+
+        if (body.status === 'FINISHED') {
+          task.status = 'success'
+          task.result = {
+            providerName: 'trRosettaRNA',
+            modelName: 'trRosettaRNA',
+            format: 'pdb',
+            structure: body.pdbContent,
+            resultPageUrl: body.resultPageUrl,
+          }
+          if (task.id === activeTaskId.value) {
+            setViewer(body.pdbContent, 'pdb')
+          }
+          return true // Finished
+        } else if (body.status === 'ERROR') {
+          task.status = 'error'
+          task.error = body.message || '预测失败'
+          return true // Finished
+        }
+        return false // Still running
+      }
+
       const body = await getMiniFoldResult(task.engineTaskId)
       if (body.status === 'success') {
         task.status = 'success'
