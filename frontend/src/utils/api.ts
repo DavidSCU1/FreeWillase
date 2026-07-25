@@ -177,7 +177,16 @@ export async function uploadEnzymeLiteratureFile(enzymeId: number, file: File) {
 
   if (!response.ok) {
     const text = await response.text().catch(() => null)
-    throw new Error(text || '上传本地文献失败')
+    let message = '上传本地附件失败'
+    try {
+      if (text) {
+        const body = JSON.parse(text)
+        message = body?.message ?? message
+      }
+    } catch (e) {
+      message = text || message
+    }
+    throw new Error(message)
   }
 
   return response.json() as Promise<LiteratureRecord>

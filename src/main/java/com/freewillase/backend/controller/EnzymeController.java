@@ -62,7 +62,7 @@ public class EnzymeController {
     }
 
     @PostMapping(path = "/{id}/literatures/upload", consumes = "multipart/form-data")
-    public LiteratureRecord uploadLiterature(@PathVariable Long id, @RequestPart("file") MultipartFile file) {
+    public LiteratureRecord uploadLiterature(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         return literatureMatchService.importLiteratureFromUpload(id, file);
     }
 

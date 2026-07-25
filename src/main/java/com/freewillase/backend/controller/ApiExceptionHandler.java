@@ -12,6 +12,8 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.LocalDateTime;
@@ -57,6 +59,20 @@ public class ApiExceptionHandler {
             }
         }
         return buildErrorResponse(HttpStatus.BAD_GATEWAY, message);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        return buildErrorResponse(HttpStatus.PAYLOAD_TOO_LARGE, "上传文件过大，请控制在 20MB 以内");
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ErrorResponse> handleMultipartException(MultipartException ex) {
+        String message = ex.getMessage() != null ? ex.getMessage() : "";
+        if (message.toLowerCase().contains("size")) {
+            return buildErrorResponse(HttpStatus.PAYLOAD_TOO_LARGE, "上传文件过大，请控制在 20MB 以内");
+        }
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, "文件上传失败，请重新选择文件后重试");
     }
 
     @ExceptionHandler(Exception.class)
