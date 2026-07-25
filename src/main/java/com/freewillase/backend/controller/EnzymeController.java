@@ -1,10 +1,12 @@
 package com.freewillase.backend.controller;
 
+import com.freewillase.backend.domain.EnzymeAnnotation;
 import com.freewillase.backend.domain.LiteratureRecord;
 import com.freewillase.backend.dto.MatchLiteratureRequest;
 import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportLiteratureFileRequest;
 import com.freewillase.backend.dto.SaveMiniFoldEnzymeRequest;
+import com.freewillase.backend.dto.UpsertEnzymeAnnotationRequest;
 import com.freewillase.backend.service.LiteratureMatchService;
 import com.freewillase.backend.service.NcbiImportService;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +56,34 @@ public class EnzymeController {
     @GetMapping("/{id}/literatures")
     public List<LiteratureRecord> getLiteratures(@PathVariable Long id) {
         return literatureMatchService.getLiteratureForEnzyme(id);
+    }
+
+    @GetMapping("/{id}/annotations")
+    public List<EnzymeAnnotation> listAnnotations(@PathVariable Long id) {
+        return ncbiImportService.listAnnotations(id);
+    }
+
+    @PostMapping("/{id}/annotations")
+    public EnzymeAnnotation createAnnotation(@PathVariable Long id, @RequestBody UpsertEnzymeAnnotationRequest request) {
+        return ncbiImportService.createAnnotation(id, request);
+    }
+
+    @PutMapping("/{id}/annotations/{annotationId}")
+    public EnzymeAnnotation updateAnnotation(
+            @PathVariable Long id,
+            @PathVariable Long annotationId,
+            @RequestBody UpsertEnzymeAnnotationRequest request) {
+        return ncbiImportService.updateAnnotation(id, annotationId, request);
+    }
+
+    @DeleteMapping("/{id}/annotations/{annotationId}")
+    public void deleteAnnotation(@PathVariable Long id, @PathVariable Long annotationId) {
+        ncbiImportService.deleteAnnotation(id, annotationId);
+    }
+
+    @PostMapping("/{id}/annotations/import-uniprot")
+    public List<EnzymeAnnotation> importAnnotationsFromUniProt(@PathVariable Long id) {
+        return ncbiImportService.importAnnotationsFromUniProt(id);
     }
 
     @PostMapping("/{id}/literatures/import")

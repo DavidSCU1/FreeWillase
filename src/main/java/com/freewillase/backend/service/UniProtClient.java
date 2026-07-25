@@ -14,10 +14,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 @Slf4j
 @Component
 public class UniProtClient {
+    private static final Set<String> DOMAIN_FEATURE_TYPES = Set.of("DOMAIN", "REGION", "REPEAT", "ZN_FING");
+    private static final Set<String> ACTIVE_SITE_FEATURE_TYPES = Set.of("ACT_SITE", "BINDING", "SITE");
+    private static final Set<String> MUTATION_FEATURE_TYPES = Set.of("MUTAGEN", "VARIANT");
 
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
@@ -74,6 +78,41 @@ public class UniProtClient {
         } catch (Exception ex) {
             log.warn("Failed to enrich accession {} from UniProt", accession, ex);
             return Optional.empty();
+        }
+    }
+
+    public List<FeatureAnnotation> fetchFeatureAnnotations(String accession) {
+        String normalizedAccession = normalize(accession);
+        if (normalizedAccession.isBlank()) {
+            return List.of();
+        }
+
+        URI uri = UriComponentsBuilder.fromHttpUrl(baseUrl + "/uniprotkb/" + normalizedAccession + ".json")
+                .queryParam("fields", "feature_count,features")
+                .build(true)
+                .toUri();
+
+        try {
+            String body = restTemplate.getForObject(uri, String.class);
+            if (body == null || body.isBlank()) {
+                return List.of();
+            }
+            JsonNode features = objectMapper.readTree(body).path("features");
+            if (!features.isArray()) {
+                return List.of();
+            }
+
+            List<FeatureAnnotation> annotations = new ArrayList<>();
+            for (JsonNode feature : features) {
+                FeatureAnnotation annotation = parseFeatureAnnotation(normalizedAccession, feature);
+                if (annotation != null) {
+                    annotations.add(annotation);
+                }
+            }
+            return annotations;
+        } catch (Exception ex) {
+            log.warn("Failed to fetch feature annotations for UniProt {}", accession, ex);
+            return List.of();
         }
     }
 
@@ -173,6 +212,132 @@ public class UniProtClient {
         return score;
     }
 
+    private FeatureAnnotation parseFeatureAnnotation(String accession, JsonNode feature) {
+        String featureType = readText(feature, "type");
+        if (featureType == null || featureType.isBlank()) {
+            return null;
+        }
+
+        String annotationType = mapFeatureType(featureType);
+        if (annotationType == null) {
+            return null;
+        }
+
+        JsonNode location = feature.path("location");
+        Integer start = readLocationPosition(location.path("start"));
+        Integer end = readLocationPosition(location.path("end"));
+        if (start == null && end == null) {
+          Integer position = readLocationPosition(location.path("position"));
+          start = position;
+          end = position;
+        }
+        if (start == null || start <= 0) {
+            return null;
+        }
+        if (end == null || end <= 0) {
+            end = start;
+        }
+        if ("MUTATION".equals(annotationType)) {
+            end = start;
+        }
+
+        String title = firstNonBlank(
+                readText(feature, "description"),
+                readText(feature, "featureId"),
+                defaultFeatureTitle(annotationType, start, end));
+        String mutationLabel = null;
+        if ("MUTATION".equals(annotationType)) {
+            mutationLabel = readText(feature, "description");
+        }
+        String evidence = buildEvidenceText(feature.path("evidences"));
+        String description = joinNonBlank(
+                readText(feature, "description"),
+                evidence == null ? null : "证据: " + evidence);
+
+        return FeatureAnnotation.builder()
+                .annotationType(annotationType)
+                .title(title)
+                .startResidue(start)
+                .endResidue(end)
+                .mutationLabel(mutationLabel)
+                .description(description)
+                .sourceDb("UNIPROT")
+                .sourceRef(accession + ":" + featureType + ":" + start + "-" + end)
+                .build();
+    }
+
+    private String mapFeatureType(String featureType) {
+        String normalized = normalize(featureType);
+        if (DOMAIN_FEATURE_TYPES.contains(normalized)) {
+            return "DOMAIN";
+        }
+        if (ACTIVE_SITE_FEATURE_TYPES.contains(normalized)) {
+            return "ACTIVE_SITE";
+        }
+        if (MUTATION_FEATURE_TYPES.contains(normalized)) {
+            return "MUTATION";
+        }
+        return null;
+    }
+
+    private Integer readLocationPosition(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        String raw = readText(node, "value");
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String buildEvidenceText(JsonNode evidences) {
+        if (!evidences.isArray()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        for (JsonNode evidence : evidences) {
+            String code = readText(evidence, "evidenceCode");
+            if (code != null && !code.isBlank()) {
+                parts.add(code);
+            }
+        }
+        return parts.isEmpty() ? null : String.join(", ", parts);
+    }
+
+    private String defaultFeatureTitle(String annotationType, Integer start, Integer end) {
+        if ("ACTIVE_SITE".equals(annotationType)) {
+            return "UniProt 活性位点 " + start;
+        }
+        if ("MUTATION".equals(annotationType)) {
+            return "UniProt 突变位点 " + start;
+        }
+        return "UniProt 结构域 " + start + "-" + end;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String joinNonBlank(String... values) {
+        List<String> parts = new ArrayList<>();
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                parts.add(value.trim());
+            }
+        }
+        return parts.isEmpty() ? null : String.join("；", parts);
+    }
+
     private boolean matchesRefSeq(List<String> refSeqAccessions, String accession) {
         String normalizedAccession = normalize(accession);
         String accessionWithoutVersion = stripVersion(normalizedAccession);
@@ -221,5 +386,18 @@ public class UniProtClient {
         @Builder.Default
         List<String> pdbIds = List.of();
         String alphaFoldAccession;
+    }
+
+    @Value
+    @Builder
+    public static class FeatureAnnotation {
+        String annotationType;
+        String title;
+        Integer startResidue;
+        Integer endResidue;
+        String mutationLabel;
+        String description;
+        String sourceDb;
+        String sourceRef;
     }
 }
