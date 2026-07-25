@@ -12,6 +12,7 @@ public class ImportAccessionsRequest {
     @NotEmpty(message = "accessions 不能为空")
     private List<String> accessions;
 
+    private String moleculeType;
     private String ncbiEmail;
     private String ncbiApiKey;
 }

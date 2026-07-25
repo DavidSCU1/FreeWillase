@@ -3,6 +3,7 @@ import type { EnzymeAnnotation, EnzymeAnnotationType, EnzymeEntry, ImportTask, L
 interface ImportRequest {
   taskName: string
   accessions: string[]
+  moleculeType: 'protein' | 'RNA'
   ncbiEmail?: string
   ncbiApiKey?: string
 }

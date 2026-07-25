@@ -22,6 +22,7 @@ export interface EnzymeEntry {
   id: number
   code: string
   sourceType: string
+  moleculeType?: 'protein' | 'RNA'
   accession: string
   proteinName: string
   organismName: string
@@ -33,6 +34,8 @@ export interface EnzymeEntry {
   structureId?: string
   structureSourceDb?: string
   structureUrl?: string
+  ncbiAccession?: string
+  ncbiUrl?: string
   ncbiProteinAccession?: string
   ncbiProteinUrl?: string
   uniprotAccession?: string

@@ -14,6 +14,10 @@ function shortHash(hash: string) {
   return hash ? `${hash.slice(0, 12)}...` : '-'
 }
 
+function sequenceUnit(enzyme: EnzymeEntry) {
+  return enzyme.moleculeType === 'RNA' ? 'nt' : 'aa'
+}
+
 function confirmDelete(id: number) {
   if (confirm('确定要从本地酶库中移除该条目吗？该操作不可撤销。')) {
     emit('delete', id)
@@ -44,7 +48,7 @@ function confirmDelete(id: number) {
         <thead>
           <tr class="bg-black/5 dark:bg-white/5 text-[10px] uppercase tracking-widest font-bold text-apple-secondary-text">
             <th class="px-6 py-4">Accession</th>
-            <th class="px-6 py-4">Protein Name</th>
+            <th class="px-6 py-4">Name</th>
             <th class="px-6 py-4">Organism</th>
             <th class="px-6 py-4">Length</th>
             <th class="px-6 py-4">Sequence Hash</th>
@@ -68,7 +72,7 @@ function confirmDelete(id: number) {
             </td>
             <td class="px-6 py-4">
               <span class="text-xs font-medium text-apple-secondary-text bg-apple-light-gray dark:bg-white/5 px-2 py-0.5 rounded-full">
-                {{ enzyme.sequenceLength }} aa
+                {{ enzyme.sequenceLength }} {{ sequenceUnit(enzyme) }}
               </span>
             </td>
             <td class="px-6 py-4">

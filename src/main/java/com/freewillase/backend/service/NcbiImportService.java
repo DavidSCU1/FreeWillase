@@ -54,6 +54,8 @@ public class NcbiImportService {
 
     public static final String SOURCE_TYPE_NCBI_IMPORT = "NCBI_IMPORT";
     public static final String SOURCE_TYPE_MINIFOLD_PREDICTION = "MINIFOLD_PREDICTION";
+    public static final String MOLECULE_TYPE_PROTEIN = "protein";
+    public static final String MOLECULE_TYPE_RNA = "RNA";
     private static final Set<String> SUPPORTED_ANNOTATION_TYPES = Set.of("DOMAIN", "ACTIVE_SITE", "MUTATION");
     private static final String ANNOTATION_SOURCE_UNIPROT = "UNIPROT";
     private static final int ANNOTATION_TITLE_MAX_LENGTH = 512;
@@ -101,13 +103,18 @@ public class NcbiImportService {
         this.relationMapper = relationMapper;
     }
 
-    public ImportTaskResponse importAccessions(String taskName, List<String> accessions, String email, String apiKey) {
+    public ImportTaskResponse importAccessions(String taskName,
+                                               List<String> accessions,
+                                               String moleculeType,
+                                               String email,
+                                               String apiKey) {
         LocalDateTime now = LocalDateTime.now();
+        String normalizedMoleculeType = normalizeMoleculeType(moleculeType);
         
         // 1. Create Task Record
         NcbiImportTask task = NcbiImportTask.builder()
                 .taskName(taskName == null || taskName.isBlank() ? "batch_import_" + UUID.randomUUID().toString().substring(0, 8) : taskName.trim())
-                .sourceType("NCBI")
+                .sourceType(MOLECULE_TYPE_RNA.equals(normalizedMoleculeType) ? "NCBI_RNA" : "NCBI_PROTEIN")
                 .totalCount(accessions.size())
                 .status("RUNNING")
                 .createdAt(now)
@@ -115,13 +122,17 @@ public class NcbiImportService {
         taskMapper.insert(task);
 
         // 2. Run Asynchronously via self-proxy
-        self.executeImportTask(task, accessions, email, apiKey);
+        self.executeImportTask(task, accessions, normalizedMoleculeType, email, apiKey);
 
         return toTaskResponse(task, null);
     }
 
     @Async
-    public void executeImportTask(NcbiImportTask task, List<String> accessions, String email, String apiKey) {
+    public void executeImportTask(NcbiImportTask task,
+                                  List<String> accessions,
+                                  String moleculeType,
+                                  String email,
+                                  String apiKey) {
         log.info("Starting async import task: {}", task.getId());
         int successCount = 0;
         int failedCount = 0;
@@ -146,40 +157,49 @@ public class NcbiImportService {
             }
 
             try {
-                NcbiEutilsClient.ProteinLookupResult result = ncbiEutilsClient.fetchProteinByAccession(accession, email, apiKey);
-                Optional<UniProtClient.ProteinEnrichment> enrichment = loadUniProtEnrichment(result);
+                boolean rnaImport = MOLECULE_TYPE_RNA.equals(moleculeType);
+                NcbiEutilsClient.LookupResult result = rnaImport
+                        ? ncbiEutilsClient.fetchNucleotideByAccession(accession, email, apiKey)
+                        : ncbiEutilsClient.fetchProteinByAccession(accession, email, apiKey);
+                Optional<UniProtClient.ProteinEnrichment> enrichment = rnaImport
+                        ? Optional.empty()
+                        : loadUniProtEnrichment(result);
                 
                 // Create Enzyme Entry
                 EnzymeEntry entry = EnzymeEntry.builder()
                         .code("ENZ_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
                         .proteinAccession(result.getAccession())
-                        .proteinVersion(extractProteinVersion(result.getAccession()))
+                        .proteinVersion(extractAccessionVersion(result.getAccession()))
                         .geneSymbol(enrichment.map(UniProtClient.ProteinEnrichment::getGeneSymbol).orElse(null))
                         .name(result.getTitle())
                         .ecNumber(enrichment.map(UniProtClient.ProteinEnrichment::getEcNumber).orElse(null))
                         .organism(result.getOrganism())
                         .taxId(result.getTaxId())
-                        .description(enrichment.map(UniProtClient.ProteinEnrichment::getFunctionSummary).orElse(null))
+                        .description(rnaImport
+                                ? "来自 NCBI Nucleotide 的核酶候选条目，当前保留原始序列与基础元数据。"
+                                : enrichment.map(UniProtClient.ProteinEnrichment::getFunctionSummary).orElse(null))
                         .sourceType(SOURCE_TYPE_NCBI_IMPORT)
                         .status("ACTIVE")
                         .createdAt(LocalDateTime.now())
                         .updatedAt(LocalDateTime.now())
                         .build();
                 enzymeEntryMapper.insert(entry);
-                savePrimarySequence(entry.getId(), result.getSequence(), result.getSequenceLength(), "NCBI");
+                savePrimarySequence(entry.getId(), result.getSequence(), result.getSequenceLength(), rnaImport ? "NCBI_NUCLEOTIDE" : "NCBI_PROTEIN");
                 saveCrossReference(
                         entry.getId(),
                         "NCBI",
-                        "PROTEIN_ACCESSION",
+                        rnaImport ? "NUCLEOTIDE_ACCESSION" : "PROTEIN_ACCESSION",
                         result.getAccession(),
-                        buildNcbiProteinUrl(result.getAccession()),
+                        buildNcbiUrl(result.getAccession(), moleculeType),
                         1
                 );
-                applyUniProtEnrichment(entry.getId(), enrichment);
-                seedInitialAnnotations(entry.getId(), entry.getProteinAccession(), entry.getTaxId(), enrichment);
+                if (!rnaImport) {
+                    applyUniProtEnrichment(entry.getId(), enrichment);
+                    seedInitialAnnotations(entry.getId(), entry.getProteinAccession(), entry.getTaxId(), enrichment);
+                }
 
                 successCount++;
-                saveTaskItem(task.getId(), entry.getProteinAccession(), "SUCCESS", buildSuccessMessage(enrichment), entry.getId());
+                saveTaskItem(task.getId(), entry.getProteinAccession(), "SUCCESS", buildSuccessMessage(moleculeType, enrichment), entry.getId());
             } catch (Exception ex) {
                 log.error("Failed to import accession: {}", accession, ex);
                 failedCount++;
@@ -258,6 +278,7 @@ public class NcbiImportService {
                             .id(entry.getId())
                             .code(entry.getCode())
                             .sourceType(entry.getSourceType())
+                            .moleculeType(resolveMoleculeType(entry, ncbiRef, primarySequences.get(entry.getId())))
                             .accession(readDisplayAccession(entry))
                             .proteinName(entry.getName())
                             .organismName(entry.getOrganism())
@@ -269,6 +290,8 @@ public class NcbiImportService {
                             .structureId(readStructureId(primaryStructure))
                             .structureSourceDb(readStructureSourceDb(primaryStructure))
                             .structureUrl(readStructureUrl(primaryStructure))
+                            .ncbiAccession(readCrossRefValue(ncbiRef))
+                            .ncbiUrl(readCrossRefUrl(ncbiRef))
                             .ncbiProteinAccession(readCrossRefValue(ncbiRef))
                             .ncbiProteinUrl(readCrossRefUrl(ncbiRef))
                             .uniprotAccession(readCrossRefValue(uniprotRef))
@@ -636,7 +659,7 @@ public class NcbiImportService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private Optional<UniProtClient.ProteinEnrichment> loadUniProtEnrichment(NcbiEutilsClient.ProteinLookupResult result) {
+    private Optional<UniProtClient.ProteinEnrichment> loadUniProtEnrichment(NcbiEutilsClient.LookupResult result) {
         try {
             return uniProtClient.enrichByRefSeqAccession(result.getAccession(), result.getTaxId());
         } catch (Exception ex) {
@@ -1048,9 +1071,11 @@ public class NcbiImportService {
         enzymeCrossRefMapper.insert(crossRef);
     }
 
-    private String buildNcbiProteinUrl(String accession) {
+    private String buildNcbiUrl(String accession, String moleculeType) {
         return accession == null || accession.isBlank()
                 ? null
+                : MOLECULE_TYPE_RNA.equals(normalizeMoleculeType(moleculeType))
+                ? "https://www.ncbi.nlm.nih.gov/nuccore/" + accession
                 : "https://www.ncbi.nlm.nih.gov/protein/" + accession;
     }
 
@@ -1072,7 +1097,7 @@ public class NcbiImportService {
                 : "https://alphafold.ebi.ac.uk/entry/" + accession;
     }
 
-    private String extractProteinVersion(String accession) {
+    private String extractAccessionVersion(String accession) {
         if (accession == null || accession.isBlank()) {
             return null;
         }
@@ -1080,7 +1105,10 @@ public class NcbiImportService {
         return dot >= 0 && dot + 1 < accession.length() ? accession.substring(dot + 1) : null;
     }
 
-    private String buildSuccessMessage(Optional<UniProtClient.ProteinEnrichment> enrichment) {
+    private String buildSuccessMessage(String moleculeType, Optional<UniProtClient.ProteinEnrichment> enrichment) {
+        if (MOLECULE_TYPE_RNA.equals(normalizeMoleculeType(moleculeType))) {
+            return "已从 NCBI Nucleotide 写入基础信息与 RNA 序列";
+        }
         if (enrichment.isEmpty()) {
             return "已从 NCBI 写入基础信息";
         }
@@ -1091,6 +1119,27 @@ public class NcbiImportService {
             return "已从 NCBI 和 UniProt 补全基础信息与结构引用";
         }
         return "已从 NCBI 和 UniProt 补全基础信息";
+    }
+
+    private String resolveMoleculeType(EnzymeEntry entry, EnzymeCrossRef ncbiRef, EnzymeSequence primarySequence) {
+        if (ncbiRef != null) {
+            if ("NUCLEOTIDE_ACCESSION".equalsIgnoreCase(ncbiRef.getRefType())) {
+                return MOLECULE_TYPE_RNA;
+            }
+            if ("PROTEIN_ACCESSION".equalsIgnoreCase(ncbiRef.getRefType())) {
+                return MOLECULE_TYPE_PROTEIN;
+            }
+        }
+        if (primarySequence != null && "NCBI_NUCLEOTIDE".equalsIgnoreCase(primarySequence.getSourceType())) {
+            return MOLECULE_TYPE_RNA;
+        }
+        return MOLECULE_TYPE_PROTEIN;
+    }
+
+    private String normalizeMoleculeType(String moleculeType) {
+        return MOLECULE_TYPE_RNA.equalsIgnoreCase(trimToNull(moleculeType))
+                ? MOLECULE_TYPE_RNA
+                : MOLECULE_TYPE_PROTEIN;
     }
 
     private ImportTaskResponse toTaskResponse(NcbiImportTask task, List<NcbiImportTaskItem> items) {

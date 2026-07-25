@@ -29,18 +29,26 @@ public class NcbiEutilsClient {
         this.toolName = toolName;
     }
 
-    public ProteinLookupResult fetchProteinByAccession(String accession, String email, String apiKey) {
-        String uid = searchProteinUid(accession, email, apiKey);
+    public LookupResult fetchProteinByAccession(String accession, String email, String apiKey) {
+        return fetchByAccession("protein", accession, email, apiKey);
+    }
+
+    public LookupResult fetchNucleotideByAccession(String accession, String email, String apiKey) {
+        return fetchByAccession("nucleotide", accession, email, apiKey);
+    }
+
+    private LookupResult fetchByAccession(String db, String accession, String email, String apiKey) {
+        String uid = searchUid(db, accession, email, apiKey);
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("NCBI 未找到 accession: " + accession);
         }
 
-        Map<String, Object> summaryRoot = getJson("/esummary.fcgi", query("db", "protein", "id", uid, "retmode", "json"), email, apiKey);
+        Map<String, Object> summaryRoot = getJson("/esummary.fcgi", query("db", db, "id", uid, "retmode", "json"), email, apiKey);
         Map<String, Object> resultNode = castMap(summaryRoot.get("result"));
         Map<String, Object> summaryNode = castMap(resultNode.get(uid));
 
         UriComponentsBuilder efetchBuilder = UriComponentsBuilder.fromHttpUrl(baseUrl + "/efetch.fcgi")
-                .queryParam("db", "protein")
+                .queryParam("db", db)
                 .queryParam("id", uid)
                 .queryParam("rettype", "fasta")
                 .queryParam("retmode", "text")
@@ -55,7 +63,7 @@ public class NcbiEutilsClient {
         );
 
         String sequence = parseSequence(fastaText);
-        return ProteinLookupResult.builder()
+        return LookupResult.builder()
                 .uid(uid)
                 .accession(readString(summaryNode, "accessionversion", accession))
                 .title(readString(summaryNode, "title", accession))
@@ -181,9 +189,9 @@ public class NcbiEutilsClient {
         }
     }
 
-    private String searchProteinUid(String accession, String email, String apiKey) {
+    private String searchUid(String db, String accession, String email, String apiKey) {
         Map<String, Object> searchRoot = getJson("/esearch.fcgi", query(
-                "db", "protein",
+                "db", db,
                 "term", accession + "[Accession]",
                 "retmode", "json"
         ), email, apiKey);
@@ -273,7 +281,7 @@ public class NcbiEutilsClient {
 
     @lombok.Value
     @Builder
-    public static class ProteinLookupResult {
+    public static class LookupResult {
         String uid;
         String accession;
         String title;

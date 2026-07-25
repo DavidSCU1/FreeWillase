@@ -11,6 +11,7 @@ public class EnzymeEntryResponse {
     Long id;
     String code;
     String sourceType;
+    String moleculeType;
     String accession;
     String proteinName;
     String organismName;
@@ -22,6 +23,8 @@ public class EnzymeEntryResponse {
     String structureId;
     String structureSourceDb;
     String structureUrl;
+    String ncbiAccession;
+    String ncbiUrl;
     String ncbiProteinAccession;
     String ncbiProteinUrl;
     String uniprotAccession;

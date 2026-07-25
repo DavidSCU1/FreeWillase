@@ -29,6 +29,7 @@ public class NcbiImportController {
         return ncbiImportService.importAccessions(
                 request.getTaskName(), 
                 request.getAccessions(),
+                request.getMoleculeType(),
                 request.getNcbiEmail(),
                 request.getNcbiApiKey()
         );

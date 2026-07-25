@@ -99,7 +99,7 @@ const activeSourceType = computed(() => String(route.meta.librarySourceType || '
 const isPredictedLibrary = computed(() => activeSourceType.value === 'MINIFOLD_PREDICTION')
 const libraryTitle = computed(() => String(route.meta.libraryTitle || '酶库中心'))
 const librarySubtitle = computed(() => String(route.meta.librarySubtitle || '管理、浏览与分析本地酶条目数据库'))
-const searchPlaceholder = computed(() => isPredictedLibrary.value ? '搜索内部编号或预测名称...' : '搜索 Accession 或蛋白名称...')
+const searchPlaceholder = computed(() => isPredictedLibrary.value ? '搜索内部编号或预测名称...' : '搜索 Accession 或条目名称...')
 const identifierLabel = computed(() => isPredictedLibrary.value ? '内部编号' : 'Accession')
 const selectedEntryBadge = computed(() => isPredictedLibrary.value ? 'MiniFold 入库条目' : 'Accession 导入条目')
 const emptyTitle = computed(() => isPredictedLibrary.value ? '还没有确认入库的预测结果' : '这里还没有 accession 导入条目')
@@ -250,6 +250,10 @@ async function handleImportUniProtAnnotations() {
   if (!selectedId.value) return
   annotationError.value = ''
   annotationNotice.value = ''
+  if (selectedEnzyme.value?.moleculeType === 'RNA') {
+    annotationNotice.value = '核酶条目当前先保留手动标注与 3D 选点，不走 UniProt / PDB 自动导入。'
+    return
+  }
   try {
     const imported = await importFromUniProt(selectedId.value)
     if (imported.length) {
@@ -344,6 +348,22 @@ const selectedEnzyme = computed(() => {
   return enzymes.value.find((item) => item.id === selectedId.value) ?? enzymes.value[0]
 })
 
+const selectedSequenceUnit = computed(() => selectedEnzyme.value?.moleculeType === 'RNA' ? 'nt' : 'aa')
+const canImportUniProtAnnotations = computed(() => !isPredictedLibrary.value && selectedEnzyme.value?.moleculeType !== 'RNA')
+const selectedNcbiSourceLabel = computed(() => {
+  if (isPredictedLibrary.value) return 'SOURCE'
+  return selectedEnzyme.value?.moleculeType === 'RNA' ? 'NCBI Nucleotide' : 'NCBI Protein'
+})
+const selectedSecondarySourceLabel = computed(() => {
+  if (isPredictedLibrary.value) return 'Library Code'
+  return selectedEnzyme.value?.moleculeType === 'RNA' ? 'RNA 注释源' : 'UniProt'
+})
+const selectedSecondarySourceValue = computed(() => {
+  if (isPredictedLibrary.value) return selectedEnzyme.value?.code || '-'
+  if (selectedEnzyme.value?.moleculeType === 'RNA') return '暂未接入'
+  return selectedEnzyme.value?.uniprotAccession || '-'
+})
+
 const selectedStructureId = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return ''
@@ -398,7 +418,11 @@ const selectedStructureStatus = computed(() => {
 const selectedNcbiUrl = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme || isPredictedLibrary.value) return undefined
-  return enzyme.ncbiProteinUrl || (enzyme.accession ? `https://www.ncbi.nlm.nih.gov/protein/${enzyme.accession}` : undefined)
+  if (enzyme.ncbiUrl) return enzyme.ncbiUrl
+  if (!enzyme.accession) return undefined
+  return enzyme.moleculeType === 'RNA'
+    ? `https://www.ncbi.nlm.nih.gov/nuccore/${enzyme.accession}`
+    : `https://www.ncbi.nlm.nih.gov/protein/${enzyme.accession}`
 })
 
 const selectedUniprotUrl = computed(() => isPredictedLibrary.value ? undefined : selectedEnzyme.value?.uniprotUrl)
@@ -518,6 +542,10 @@ watch(
       return
     }
     const enzyme = selectedEnzyme.value
+    if (enzyme?.moleculeType === 'RNA') {
+      attemptedAutoImportAnnotationIds.add(enzymeId)
+      return
+    }
     if (!enzyme?.uniprotAccession && !enzyme?.pdbId) {
       // #region debug-point D:auto-import-skipped
       fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'D', location: 'EnzymesPage.vue:autoImportWatch:520', msg: '[DEBUG] auto import skipped for missing uniprot accession', data: { enzymeId, pdbId: enzyme?.pdbId || null, structureId: enzyme?.structureId || null }, ts: Date.now() }) }).catch(() => {})
@@ -684,7 +712,7 @@ onUnmounted(() => {
                 </span>
                 <div class="flex items-center gap-2">
                   <span v-if="selectedEnzyme?.id === enzyme.id" class="text-[10px] font-medium opacity-70 italic">
-                    {{ enzyme.sequenceLength }} aa
+                    {{ enzyme.sequenceLength }} {{ enzyme.moleculeType === 'RNA' ? 'nt' : 'aa' }}
                   </span>
                   <button 
                     @click.stop="handleDelete(enzyme.id)"
@@ -767,7 +795,7 @@ onUnmounted(() => {
                 <Layers :size="14" />
                 <span class="text-[10px] font-bold uppercase tracking-widest">序列长度</span>
               </div>
-              <p class="text-2xl font-bold text-apple-text">{{ selectedEnzyme.sequenceLength }} <span class="text-sm font-medium opacity-50">aa</span></p>
+              <p class="text-2xl font-bold text-apple-text">{{ selectedEnzyme.sequenceLength }} <span class="text-sm font-medium opacity-50">{{ selectedSequenceUnit }}</span></p>
             </div>
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
@@ -789,16 +817,16 @@ onUnmounted(() => {
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
                 <Database :size="14" />
-                  <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'SOURCE' : 'NCBI' }}</span>
+                  <span class="text-[10px] font-bold uppercase tracking-widest">{{ selectedNcbiSourceLabel }}</span>
               </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? 'MiniFold Confirmed' : (selectedEnzyme.ncbiProteinAccession || selectedEnzyme.accession) }}</p>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? 'MiniFold Confirmed' : (selectedEnzyme.ncbiAccession || selectedEnzyme.accession) }}</p>
             </div>
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
                 <Tag :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'Library Code' : 'UniProt' }}</span>
+                <span class="text-[10px] font-bold uppercase tracking-widest">{{ selectedSecondarySourceLabel }}</span>
               </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? selectedEnzyme.code : (selectedEnzyme.uniprotAccession || '-') }}</p>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedSecondarySourceValue }}</p>
             </div>
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
@@ -820,7 +848,7 @@ onUnmounted(() => {
               查看 NCBI 页面
             </a>
             <a
-              v-if="selectedUniprotUrl"
+              v-if="selectedUniprotUrl && canImportUniProtAnnotations"
               :href="selectedUniprotUrl"
               target="_blank"
               rel="noreferrer"
@@ -926,7 +954,7 @@ onUnmounted(() => {
                 </div>
                 <div class="flex items-center gap-2">
                   <button
-                    v-if="!isPredictedLibrary"
+                    v-if="canImportUniProtAnnotations"
                     type="button"
                     class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
                     :disabled="importingAnnotations"
@@ -977,7 +1005,7 @@ onUnmounted(() => {
                   手动注释 <span class="ml-1 font-bold text-apple-text">{{ manualAnnotationCount }}</span>
                 </div>
                 <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
-                  自动导入（UniProt / PDB） <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
+                  {{ selectedEnzyme.moleculeType === 'RNA' ? '自动导入（暂未接入）' : '自动导入（UniProt / PDB）' }} <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
                 </div>
                 <div
                   v-if="structurePickMode"
@@ -996,7 +1024,7 @@ onUnmounted(() => {
                     <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">序列注释视图</p>
                     <p class="text-xs text-apple-secondary-text mt-1">点击下方彩色区段可同步选中对应注释，并在 3D 结构中聚焦查看。</p>
                   </div>
-                  <p class="text-xs font-semibold text-apple-text">Length: {{ selectedEnzyme.sequenceLength }} aa</p>
+                  <p class="text-xs font-semibold text-apple-text">Length: {{ selectedEnzyme.sequenceLength }} {{ selectedSequenceUnit }}</p>
                 </div>
                 <div class="relative h-12 rounded-full bg-white dark:bg-black/20 border border-apple-border overflow-hidden">
                   <div

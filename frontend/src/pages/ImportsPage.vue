@@ -9,6 +9,7 @@ import { useNcbiImport } from '@/composables/useNcbiImport'
 const {
   taskName,
   accessionInput,
+  moleculeType,
   ncbiEmail,
   ncbiApiKey,
   task,
@@ -48,7 +49,7 @@ onMounted(async () => {
             </div>
             <div>
               <h2 class="text-lg font-bold text-apple-text">批量 Accession 录入</h2>
-              <p class="text-xs text-apple-secondary-text">支持 Protein Accession (如 WP_012345678.1)</p>
+              <p class="text-xs text-apple-secondary-text">支持 Protein Accession 与 Nucleotide Accession 两种导入模式</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -71,15 +72,34 @@ onMounted(async () => {
               />
             </div>
             <div class="space-y-2">
-              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">识别模式</label>
+              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">导入类型</label>
               <div class="flex gap-2">
-                <button class="flex-1 py-3 rounded-apple bg-apple-blue text-white text-xs font-bold shadow-lg shadow-apple-blue/20">
-                  自动识别 (Accession)
+                <button
+                  type="button"
+                  class="flex-1 py-3 rounded-apple text-xs font-bold transition-all"
+                  :class="moleculeType === 'protein'
+                    ? 'bg-apple-blue text-white shadow-lg shadow-apple-blue/20'
+                    : 'bg-apple-background dark:bg-white/5 border border-apple-border text-apple-secondary-text hover:text-apple-text'"
+                  @click="moleculeType = 'protein'"
+                >
+                  蛋白质酶
                 </button>
-                <button class="flex-1 py-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border text-apple-secondary-text text-xs font-bold hover:text-apple-text transition-colors">
-                  自定义映射
+                <button
+                  type="button"
+                  class="flex-1 py-3 rounded-apple text-xs font-bold transition-all"
+                  :class="moleculeType === 'RNA'
+                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
+                    : 'bg-apple-background dark:bg-white/5 border border-apple-border text-apple-secondary-text hover:text-apple-text'"
+                  @click="moleculeType = 'RNA'"
+                >
+                  核酶 / RNA 酶
                 </button>
               </div>
+              <p class="text-[10px] text-apple-secondary-text ml-1">
+                {{ moleculeType === 'protein'
+                  ? '当前将检索 NCBI Protein 库，并继续尝试 UniProt / PDB 自动补全。'
+                  : '当前将检索 NCBI Nucleotide 库，先导入 RNA 序列与基础信息。' }}
+              </p>
             </div>
           </div>
 
@@ -99,7 +119,9 @@ onMounted(async () => {
             <textarea 
               v-model="accessionInput"
               rows="12"
-              placeholder="每行输入一个 Accession，或使用逗号、空格分隔..."
+              :placeholder="moleculeType === 'protein'
+                ? '每行输入一个 Protein Accession，例如 WP_010248927.1 或 NP_001092.1'
+                : '每行输入一个 Nucleotide Accession，例如 NR_001566.1 或 XM_123456.2'"
               class="apple-input font-mono text-sm leading-relaxed resize-none"
             ></textarea>
           </div>

@@ -5,6 +5,7 @@ import type { EnzymeEntry, ImportTask } from '@/types'
 export function useNcbiImport() {
   const taskName = ref('ncbi_batch_bootstrap_001')
   const accessionInput = ref('WP_010248927.1\nNP_001092.1')
+  const moleculeType = ref<'protein' | 'RNA'>((localStorage.getItem('ncbi_import_molecule_type') as 'protein' | 'RNA') || 'protein')
   const ncbiEmail = ref(localStorage.getItem('ncbi_email') || '')
   const ncbiApiKey = ref(localStorage.getItem('ncbi_api_key') || '')
   const task = ref<ImportTask | null>(null)
@@ -92,11 +93,13 @@ export function useNcbiImport() {
     // Save credentials to localStorage
     localStorage.setItem('ncbi_email', ncbiEmail.value)
     localStorage.setItem('ncbi_api_key', ncbiApiKey.value)
+    localStorage.setItem('ncbi_import_molecule_type', moleculeType.value)
 
     try {
       task.value = await importAccessions({
         taskName: taskName.value.trim(),
         accessions: parseAccessions(),
+        moleculeType: moleculeType.value,
         ncbiEmail: ncbiEmail.value.trim() || undefined,
         ncbiApiKey: ncbiApiKey.value.trim() || undefined,
       })
@@ -112,6 +115,7 @@ export function useNcbiImport() {
   return {
     taskName,
     accessionInput,
+    moleculeType,
     ncbiEmail,
     ncbiApiKey,
     task,
