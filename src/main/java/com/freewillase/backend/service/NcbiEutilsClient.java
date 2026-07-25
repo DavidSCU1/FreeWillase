@@ -73,6 +73,32 @@ public class NcbiEutilsClient {
         return parseNucleotideFeatureAnnotations(accession, xmlText);
     }
 
+    public List<NucleotideReference> fetchNucleotideReferences(String accession, String email, String apiKey) {
+        String uid = searchUid("nucleotide", accession, email, apiKey);
+        if (uid == null || uid.isBlank()) {
+            throw new IllegalArgumentException("NCBI 未找到 accession: " + accession);
+        }
+
+        UriComponentsBuilder efetchBuilder = UriComponentsBuilder.fromHttpUrl(baseUrl + "/efetch.fcgi")
+                .queryParam("db", "nucleotide")
+                .queryParam("id", uid)
+                .queryParam("rettype", "gbc")
+                .queryParam("retmode", "xml")
+                .queryParam("tool", toolName);
+
+        if (email != null && !email.isBlank()) efetchBuilder.queryParam("email", email);
+        if (apiKey != null && !apiKey.isBlank()) efetchBuilder.queryParam("api_key", apiKey);
+
+        String xmlText = restTemplate.getForObject(
+                efetchBuilder.encode().build().toUri(),
+                String.class
+        );
+        if (xmlText == null || xmlText.isBlank()) {
+            return List.of();
+        }
+        return parseNucleotideReferences(xmlText);
+    }
+
     private LookupResult fetchByAccession(String db, String accession, String email, String apiKey) {
         String uid = searchUid(db, accession, email, apiKey);
         if (uid == null || uid.isBlank()) {
@@ -344,6 +370,46 @@ public class NcbiEutilsClient {
         }
     }
 
+    private List<NucleotideReference> parseNucleotideReferences(String xmlText) {
+        try {
+            Document document = parseXml(xmlText);
+            NodeList seqNodes = document.getElementsByTagName("INSDSeq");
+            if (seqNodes.getLength() == 0) {
+                return List.of();
+            }
+            Element seqElement = (Element) seqNodes.item(0);
+            NodeList referenceNodes = seqElement.getElementsByTagName("INSDReference");
+            List<NucleotideReference> references = new ArrayList<>();
+            for (int i = 0; i < referenceNodes.getLength(); i++) {
+                Element refElement = (Element) referenceNodes.item(i);
+                String pmid = childText(refElement, "INSDReference_pubmed");
+                if (pmid == null || pmid.isBlank()) {
+                    continue;
+                }
+                List<String> authors = new ArrayList<>();
+                NodeList authorNodes = refElement.getElementsByTagName("INSDAuthor");
+                for (int j = 0; j < authorNodes.getLength(); j++) {
+                    String author = authorNodes.item(j) == null ? null : authorNodes.item(j).getTextContent();
+                    if (author != null && !author.isBlank()) {
+                        authors.add(author.trim());
+                    }
+                }
+                String journal = childText(refElement, "INSDReference_journal");
+                references.add(NucleotideReference.builder()
+                        .pmid(pmid)
+                        .title(firstNonBlank(childText(refElement, "INSDReference_title"), "No Title"))
+                        .authors(formatAuthors(authors))
+                        .journal(firstNonBlank(journal, "Unknown Journal"))
+                        .publishYear(parseYearFromText(journal))
+                        .build());
+            }
+            return references;
+        } catch (Exception ex) {
+            log.warn("Failed to parse nucleotide references", ex);
+            return List.of();
+        }
+    }
+
     private NucleotideFeatureAnnotation buildNucleotideFeatureAnnotation(String accession,
                                                                         String featureKey,
                                                                         LocationRange range,
@@ -505,6 +571,13 @@ public class NcbiEutilsClient {
         return description.isBlank() ? null : description;
     }
 
+    private Document parseXml(String xmlText) throws Exception {
+        String sanitizedXml = xmlText.replaceFirst("(?s)<!DOCTYPE[^>]*>", "");
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(false);
+        return factory.newDocumentBuilder().parse(new InputSource(new StringReader(sanitizedXml)));
+    }
+
     private boolean shouldSkipFeature(String featureKey, LocationRange range, int sequenceLength) {
         String normalizedKey = featureKey == null ? "" : featureKey.toLowerCase(Locale.ROOT);
         if ("source".equals(normalizedKey)) {
@@ -584,6 +657,21 @@ public class NcbiEutilsClient {
         }
     }
 
+    private int parseYearFromText(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(19|20)\\d{2}").matcher(text);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
     private String firstNonBlank(String... candidates) {
         for (String candidate : candidates) {
             if (candidate != null && !candidate.isBlank()) {
@@ -591,6 +679,15 @@ public class NcbiEutilsClient {
             }
         }
         return null;
+    }
+
+    private String formatAuthors(List<String> authors) {
+        if (authors == null || authors.isEmpty()) {
+            return "Unknown Authors";
+        }
+        return authors.stream()
+                .limit(3)
+                .collect(Collectors.joining(", ")) + (authors.size() > 3 ? " et al." : "");
     }
 
     private String readString(Map<String, Object> node, String field, String fallback) {
@@ -666,6 +763,16 @@ public class NcbiEutilsClient {
         String description;
         String sourceDb;
         String sourceRef;
+    }
+
+    @lombok.Value
+    @Builder
+    public static class NucleotideReference {
+        String pmid;
+        String title;
+        String authors;
+        String journal;
+        int publishYear;
     }
 
     private record LocationRange(int start, int end) {
