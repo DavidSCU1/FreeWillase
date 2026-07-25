@@ -1,6 +1,7 @@
 package com.freewillase.backend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.freewillase.backend.domain.EnzymeAnnotation;
 import com.freewillase.backend.domain.EnzymeCrossRef;
 import com.freewillase.backend.domain.EnzymeEntry;
 import com.freewillase.backend.domain.EnzymeSequence;
@@ -11,6 +12,8 @@ import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportTaskItemResponse;
 import com.freewillase.backend.dto.ImportTaskResponse;
 import com.freewillase.backend.dto.SaveMiniFoldEnzymeRequest;
+import com.freewillase.backend.dto.UpsertEnzymeAnnotationRequest;
+import com.freewillase.backend.mapper.EnzymeAnnotationMapper;
 import com.freewillase.backend.mapper.EnzymeCrossRefMapper;
 import com.freewillase.backend.mapper.EnzymeEntryMapper;
 import com.freewillase.backend.mapper.EnzymeSequenceMapper;
@@ -33,12 +36,14 @@ import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -49,9 +54,13 @@ public class NcbiImportService {
 
     public static final String SOURCE_TYPE_NCBI_IMPORT = "NCBI_IMPORT";
     public static final String SOURCE_TYPE_MINIFOLD_PREDICTION = "MINIFOLD_PREDICTION";
+    private static final Set<String> SUPPORTED_ANNOTATION_TYPES = Set.of("DOMAIN", "ACTIVE_SITE", "MUTATION");
+    private static final String ANNOTATION_SOURCE_UNIPROT = "UNIPROT";
 
     private final NcbiEutilsClient ncbiEutilsClient;
     private final UniProtClient uniProtClient;
+    private final RcsbPdbClient rcsbPdbClient;
+    private final EnzymeAnnotationMapper enzymeAnnotationMapper;
     private final EnzymeCrossRefMapper enzymeCrossRefMapper;
     private final EnzymeEntryMapper enzymeEntryMapper;
     private final EnzymeSequenceMapper enzymeSequenceMapper;
@@ -67,6 +76,8 @@ public class NcbiImportService {
     public NcbiImportService(
             NcbiEutilsClient ncbiEutilsClient,
             UniProtClient uniProtClient,
+            RcsbPdbClient rcsbPdbClient,
+            EnzymeAnnotationMapper enzymeAnnotationMapper,
             EnzymeCrossRefMapper enzymeCrossRefMapper,
             EnzymeEntryMapper enzymeEntryMapper,
             EnzymeSequenceMapper enzymeSequenceMapper,
@@ -76,6 +87,8 @@ public class NcbiImportService {
             LiteratureRelationMapper relationMapper) {
         this.ncbiEutilsClient = ncbiEutilsClient;
         this.uniProtClient = uniProtClient;
+        this.rcsbPdbClient = rcsbPdbClient;
+        this.enzymeAnnotationMapper = enzymeAnnotationMapper;
         this.enzymeCrossRefMapper = enzymeCrossRefMapper;
         this.enzymeEntryMapper = enzymeEntryMapper;
         this.enzymeSequenceMapper = enzymeSequenceMapper;
@@ -160,6 +173,7 @@ public class NcbiImportService {
                         1
                 );
                 applyUniProtEnrichment(entry.getId(), enrichment);
+                seedInitialAnnotations(entry.getId(), entry.getProteinAccession(), entry.getTaxId(), enrichment);
 
                 successCount++;
                 saveTaskItem(task.getId(), entry.getProteinAccession(), "SUCCESS", buildSuccessMessage(enrichment), entry.getId());
@@ -337,9 +351,76 @@ public class NcbiImportService {
                 .orElseThrow(() -> new IllegalArgumentException("未找到酶条目: " + enzymeId));
     }
 
+    public List<EnzymeAnnotation> listAnnotations(Long enzymeId) {
+        ensureEnzymeExists(enzymeId);
+        return enzymeAnnotationMapper.selectList(new LambdaQueryWrapper<EnzymeAnnotation>()
+                .eq(EnzymeAnnotation::getEnzymeId, enzymeId)
+                .orderByAsc(EnzymeAnnotation::getStartResidue)
+                .orderByAsc(EnzymeAnnotation::getEndResidue)
+                .orderByAsc(EnzymeAnnotation::getCreatedAt));
+    }
+
+    @Transactional
+    public EnzymeAnnotation createAnnotation(Long enzymeId, UpsertEnzymeAnnotationRequest request) {
+        ensureEnzymeExists(enzymeId);
+        EnzymeAnnotation annotation = buildAnnotationEntity(enzymeId, null, request);
+        enzymeAnnotationMapper.insert(annotation);
+        return enzymeAnnotationMapper.selectById(annotation.getId());
+    }
+
+    @Transactional
+    public EnzymeAnnotation updateAnnotation(Long enzymeId, Long annotationId, UpsertEnzymeAnnotationRequest request) {
+        ensureEnzymeExists(enzymeId);
+        EnzymeAnnotation existing = enzymeAnnotationMapper.selectById(annotationId);
+        if (existing == null || !enzymeId.equals(existing.getEnzymeId())) {
+            throw new IllegalArgumentException("未找到对应的酶注释记录");
+        }
+        EnzymeAnnotation annotation = buildAnnotationEntity(enzymeId, existing, request);
+        annotation.setId(annotationId);
+        enzymeAnnotationMapper.updateById(annotation);
+        return enzymeAnnotationMapper.selectById(annotationId);
+    }
+
+    @Transactional
+    public void deleteAnnotation(Long enzymeId, Long annotationId) {
+        ensureEnzymeExists(enzymeId);
+        EnzymeAnnotation existing = enzymeAnnotationMapper.selectById(annotationId);
+        if (existing == null || !enzymeId.equals(existing.getEnzymeId())) {
+            throw new IllegalArgumentException("未找到对应的酶注释记录");
+        }
+        enzymeAnnotationMapper.deleteById(annotationId);
+    }
+
+    @Transactional
+    public List<EnzymeAnnotation> importAnnotationsFromUniProt(Long enzymeId) {
+        EnzymeEntry entry = ensureEnzymeExists(enzymeId);
+        EnzymeEntryResponse response = getEnzymeResponse(enzymeId);
+        Optional<UniProtClient.ProteinEnrichment> enrichment = loadUniProtEnrichmentForAnnotations(entry, response);
+        List<EnzymeAnnotation> existing = listAnnotations(enzymeId);
+        List<EnzymeAnnotation> imported = new ArrayList<>();
+
+        String accession = resolveUniProtAccession(enzymeId, entry, response, enrichment);
+        if (accession != null) {
+            imported.addAll(importUniProtFeatures(enzymeId, accession, existing));
+        }
+
+        String pdbId = resolvePdbId(response, enrichment);
+        if (pdbId != null) {
+            imported.addAll(importPdbFeatures(enzymeId, pdbId, existing));
+        }
+
+        if (accession == null && pdbId == null) {
+            throw new IllegalArgumentException("当前酶条目缺少 UniProt accession 和 PDB 结构编号，暂时无法自动导入初始注释");
+        }
+        return imported;
+    }
+
     @Transactional
     public void deleteEnzyme(Long id) {
         EnzymeEntry entry = enzymeEntryMapper.selectById(id);
+
+        enzymeAnnotationMapper.delete(new LambdaQueryWrapper<EnzymeAnnotation>()
+                .eq(EnzymeAnnotation::getEnzymeId, id));
 
         // 1. Delete literature relations
         relationMapper.delete(new LambdaQueryWrapper<com.freewillase.backend.domain.LiteratureRelation>()
@@ -379,11 +460,178 @@ public class NcbiImportService {
         enzymeSequenceMapper.insert(enzymeSequence);
     }
 
+    private EnzymeEntry ensureEnzymeExists(Long enzymeId) {
+        EnzymeEntry entry = enzymeId == null ? null : enzymeEntryMapper.selectById(enzymeId);
+        if (entry == null) {
+            throw new IllegalArgumentException("未找到酶条目: " + enzymeId);
+        }
+        return entry;
+    }
+
+    private EnzymeAnnotation buildAnnotationEntity(Long enzymeId, EnzymeAnnotation existing, UpsertEnzymeAnnotationRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("缺少注释数据");
+        }
+        String annotationType = normalizeAnnotationType(request.getAnnotationType());
+        Integer startResidue = request.getStartResidue();
+        Integer endResidue = request.getEndResidue() != null ? request.getEndResidue() : request.getStartResidue();
+        if (startResidue == null || startResidue <= 0) {
+            throw new IllegalArgumentException("起始残基位点必须为正整数");
+        }
+        if (endResidue == null || endResidue <= 0) {
+            throw new IllegalArgumentException("结束残基位点必须为正整数");
+        }
+        if (endResidue < startResidue) {
+            throw new IllegalArgumentException("结束残基位点不能小于起始残基位点");
+        }
+        if ("MUTATION".equals(annotationType)) {
+            endResidue = startResidue;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        return EnzymeAnnotation.builder()
+                .id(existing != null ? existing.getId() : null)
+                .enzymeId(enzymeId)
+                .annotationType(annotationType)
+                .title(buildAnnotationTitle(annotationType, request.getTitle(), startResidue, endResidue))
+                .startResidue(startResidue)
+                .endResidue(endResidue)
+                .chainLabel(trimToNull(request.getChainLabel()))
+                .mutationLabel(trimToNull(request.getMutationLabel()))
+                .colorHex(normalizeColorHex(request.getColorHex()))
+                .description(trimToNull(request.getDescription()))
+                .sourceDb(existing != null ? existing.getSourceDb() : null)
+                .sourceRef(existing != null ? existing.getSourceRef() : null)
+                .createdAt(existing != null ? existing.getCreatedAt() : now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private EnzymeAnnotation buildImportedAnnotation(Long enzymeId,
+                                                     String annotationType,
+                                                     String title,
+                                                     Integer startResidue,
+                                                     Integer endResidue,
+                                                     String chainLabel,
+                                                     String mutationLabel,
+                                                     String description,
+                                                     String sourceDb,
+                                                     String sourceRef) {
+        LocalDateTime now = LocalDateTime.now();
+        return EnzymeAnnotation.builder()
+                .enzymeId(enzymeId)
+                .annotationType(annotationType)
+                .title(title)
+                .startResidue(startResidue)
+                .endResidue(endResidue)
+                .chainLabel(trimToNull(chainLabel))
+                .mutationLabel(trimToNull(mutationLabel))
+                .colorHex(defaultAnnotationColor(annotationType))
+                .description(trimToNull(description))
+                .sourceDb(trimToNull(sourceDb))
+                .sourceRef(trimToNull(sourceRef))
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private boolean annotationAlreadyExists(List<EnzymeAnnotation> existing,
+                                            String annotationType,
+                                            Integer startResidue,
+                                            Integer endResidue,
+                                            String title,
+                                            String sourceDb,
+                                            String sourceRef) {
+        final String normalizedSourceDb = trimToNull(sourceDb);
+        final String normalizedSourceRef = trimToNull(sourceRef);
+        return existing.stream().anyMatch(item -> {
+            if (normalizedSourceDb != null && normalizedSourceRef != null
+                    && normalizedSourceDb.equalsIgnoreCase(defaultString(item.getSourceDb()))
+                    && normalizedSourceRef.equalsIgnoreCase(defaultString(item.getSourceRef()))) {
+                return true;
+            }
+            return annotationType.equalsIgnoreCase(defaultString(item.getAnnotationType()))
+                    && startResidue.equals(item.getStartResidue())
+                    && endResidue.equals(item.getEndResidue())
+                    && defaultString(title).equalsIgnoreCase(defaultString(item.getTitle()));
+        });
+    }
+
+    private String normalizeAnnotationType(String annotationType) {
+        String normalized = trimToNull(annotationType);
+        if (normalized == null) {
+            throw new IllegalArgumentException("请选择注释类型");
+        }
+        normalized = normalized.toUpperCase();
+        if (!SUPPORTED_ANNOTATION_TYPES.contains(normalized)) {
+            throw new IllegalArgumentException("不支持的注释类型: " + annotationType);
+        }
+        return normalized;
+    }
+
+    private String buildAnnotationTitle(String annotationType, String title, Integer startResidue, Integer endResidue) {
+        String normalizedTitle = trimToNull(title);
+        if (normalizedTitle != null) {
+            return normalizedTitle;
+        }
+        if ("ACTIVE_SITE".equals(annotationType)) {
+            return "活性位点 " + startResidue;
+        }
+        if ("MUTATION".equals(annotationType)) {
+            return "突变位点 " + startResidue;
+        }
+        return "结构域 " + startResidue + "-" + endResidue;
+    }
+
+    private String normalizeColorHex(String colorHex) {
+        String normalized = trimToNull(colorHex);
+        if (normalized == null) {
+            return "#3B82F6";
+        }
+        if (!normalized.startsWith("#")) {
+            normalized = "#" + normalized;
+        }
+        if (!normalized.matches("^#[0-9A-Fa-f]{6}$")) {
+            throw new IllegalArgumentException("颜色值格式不正确，请使用 #RRGGBB");
+        }
+        return normalized.toUpperCase();
+    }
+
+    private String defaultAnnotationColor(String annotationType) {
+        if ("ACTIVE_SITE".equalsIgnoreCase(annotationType)) {
+            return "#10B981";
+        }
+        if ("MUTATION".equalsIgnoreCase(annotationType)) {
+            return "#F97316";
+        }
+        return "#3B82F6";
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     private Optional<UniProtClient.ProteinEnrichment> loadUniProtEnrichment(NcbiEutilsClient.ProteinLookupResult result) {
         try {
             return uniProtClient.enrichByRefSeqAccession(result.getAccession(), result.getTaxId());
         } catch (Exception ex) {
             log.warn("UniProt enrichment failed for accession {}", result.getAccession(), ex);
+            return Optional.empty();
+        }
+    }
+
+    private Optional<UniProtClient.ProteinEnrichment> loadUniProtEnrichment(EnzymeEntry entry) {
+        if (entry == null || trimToNull(entry.getProteinAccession()) == null) {
+            return Optional.empty();
+        }
+        try {
+            return uniProtClient.enrichByRefSeqAccession(entry.getProteinAccession(), entry.getTaxId());
+        } catch (Exception ex) {
+            log.warn("UniProt enrichment failed for enzyme {}", entry.getId(), ex);
             return Optional.empty();
         }
     }
@@ -434,6 +682,169 @@ public class NcbiImportService {
                     hasPdb ? 0 : 1
             );
         }
+    }
+
+    private void seedInitialAnnotations(Long enzymeId,
+                                        String proteinAccession,
+                                        String taxId,
+                                        Optional<UniProtClient.ProteinEnrichment> enrichmentOptional) {
+        try {
+            String accession = enrichmentOptional
+                    .map(UniProtClient.ProteinEnrichment::getPrimaryAccession)
+                    .map(this::trimToNull)
+                    .orElse(null);
+            if (accession == null) {
+                accession = uniProtClient.enrichByRefSeqAccession(proteinAccession, taxId)
+                        .map(UniProtClient.ProteinEnrichment::getPrimaryAccession)
+                        .map(this::trimToNull)
+                        .orElse(null);
+            }
+            List<EnzymeAnnotation> existing = listAnnotations(enzymeId);
+            if (accession != null) {
+                importUniProtFeatures(enzymeId, accession, existing);
+            }
+
+            String pdbId = enrichmentOptional
+                    .filter(item -> !item.getPdbIds().isEmpty())
+                    .map(item -> trimToNull(item.getPdbIds().get(0)))
+                    .orElse(null);
+            if (pdbId != null) {
+                importPdbFeatures(enzymeId, pdbId, existing);
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to seed initial annotations for enzyme {}", enzymeId, ex);
+        }
+    }
+
+    private Optional<UniProtClient.ProteinEnrichment> loadUniProtEnrichmentForAnnotations(EnzymeEntry entry,
+                                                                                           EnzymeEntryResponse response) {
+        if (trimToNull(response.getUniprotAccession()) != null || trimToNull(response.getPdbId()) != null) {
+            return Optional.empty();
+        }
+        return loadUniProtEnrichment(entry);
+    }
+
+    private String resolveUniProtAccession(Long enzymeId,
+                                           EnzymeEntry entry,
+                                           EnzymeEntryResponse response,
+                                           Optional<UniProtClient.ProteinEnrichment> enrichment) {
+        String accession = trimToNull(response.getUniprotAccession());
+        if (accession != null) {
+            return accession;
+        }
+
+        accession = enrichment
+                .map(UniProtClient.ProteinEnrichment::getPrimaryAccession)
+                .map(this::trimToNull)
+                .orElse(null);
+        if (accession != null) {
+            saveCrossReference(
+                    enzymeId,
+                    ANNOTATION_SOURCE_UNIPROT,
+                    "ACCESSION",
+                    accession,
+                    buildUniProtUrl(accession),
+                    1
+            );
+            return accession;
+        }
+
+        return loadUniProtEnrichment(entry)
+                .map(UniProtClient.ProteinEnrichment::getPrimaryAccession)
+                .map(this::trimToNull)
+                .orElse(null);
+    }
+
+    private String resolvePdbId(EnzymeEntryResponse response,
+                                Optional<UniProtClient.ProteinEnrichment> enrichment) {
+        String pdbId = trimToNull(response.getPdbId());
+        if (pdbId != null) {
+            return pdbId;
+        }
+        return enrichment
+                .filter(item -> !item.getPdbIds().isEmpty())
+                .map(item -> trimToNull(item.getPdbIds().get(0)))
+                .orElse(null);
+    }
+
+    private List<EnzymeAnnotation> importUniProtFeatures(Long enzymeId,
+                                                         String accession,
+                                                         List<EnzymeAnnotation> existing) {
+        List<UniProtClient.FeatureAnnotation> features = uniProtClient.fetchFeatureAnnotations(accession);
+        if (features.isEmpty()) {
+            return List.of();
+        }
+
+        List<EnzymeAnnotation> imported = new ArrayList<>();
+        for (UniProtClient.FeatureAnnotation feature : features) {
+            if (annotationAlreadyExists(
+                    existing,
+                    feature.getAnnotationType(),
+                    feature.getStartResidue(),
+                    feature.getEndResidue(),
+                    feature.getTitle(),
+                    feature.getSourceDb(),
+                    feature.getSourceRef())) {
+                continue;
+            }
+            EnzymeAnnotation annotation = buildImportedAnnotation(
+                    enzymeId,
+                    feature.getAnnotationType(),
+                    feature.getTitle(),
+                    feature.getStartResidue(),
+                    feature.getEndResidue(),
+                    null,
+                    feature.getMutationLabel(),
+                    feature.getDescription(),
+                    feature.getSourceDb(),
+                    feature.getSourceRef()
+            );
+            enzymeAnnotationMapper.insert(annotation);
+            EnzymeAnnotation saved = enzymeAnnotationMapper.selectById(annotation.getId());
+            existing.add(saved);
+            imported.add(saved);
+        }
+        return imported;
+    }
+
+    private List<EnzymeAnnotation> importPdbFeatures(Long enzymeId,
+                                                     String pdbId,
+                                                     List<EnzymeAnnotation> existing) {
+        List<RcsbPdbClient.PdbFeatureAnnotation> features = rcsbPdbClient.fetchFeatureAnnotations(pdbId);
+        if (features.isEmpty()) {
+            return List.of();
+        }
+
+        List<EnzymeAnnotation> imported = new ArrayList<>();
+        for (RcsbPdbClient.PdbFeatureAnnotation feature : features) {
+            if (annotationAlreadyExists(
+                    existing,
+                    feature.getAnnotationType(),
+                    feature.getStartResidue(),
+                    feature.getEndResidue(),
+                    feature.getTitle(),
+                    feature.getSourceDb(),
+                    feature.getSourceRef())) {
+                continue;
+            }
+            EnzymeAnnotation annotation = buildImportedAnnotation(
+                    enzymeId,
+                    feature.getAnnotationType(),
+                    feature.getTitle(),
+                    feature.getStartResidue(),
+                    feature.getEndResidue(),
+                    feature.getChainLabel(),
+                    null,
+                    feature.getDescription(),
+                    feature.getSourceDb(),
+                    feature.getSourceRef()
+            );
+            enzymeAnnotationMapper.insert(annotation);
+            EnzymeAnnotation saved = enzymeAnnotationMapper.selectById(annotation.getId());
+            existing.add(saved);
+            imported.add(saved);
+        }
+        return imported;
     }
 
     private void saveStructure(Long enzymeId, String structureType, String structureId, String sourceDb, String sourceUrl, int isPrimary) {

@@ -1,4 +1,4 @@
-import type { EnzymeEntry, ImportTask, LiteratureRecord } from '@/types'
+import type { EnzymeAnnotation, EnzymeAnnotationType, EnzymeEntry, ImportTask, LiteratureRecord } from '@/types'
 
 interface ImportRequest {
   taskName: string
@@ -27,6 +27,17 @@ interface SaveMiniFoldEnzymeRequest {
   targetChains?: number
   backend?: string
   useAcceleration?: boolean
+}
+
+interface UpsertEnzymeAnnotationRequest {
+  annotationType: EnzymeAnnotationType
+  title?: string
+  startResidue: number
+  endResidue?: number
+  chainLabel?: string
+  mutationLabel?: string
+  colorHex?: string
+  description?: string
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -142,6 +153,36 @@ export function getEnzymeStructure(enzymeId: number) {
   return request<string>(`/api/enzymes/${enzymeId}/structure`)
 }
 
+export function listEnzymeAnnotations(enzymeId: number) {
+  return request<EnzymeAnnotation[]>(`/api/enzymes/${enzymeId}/annotations`)
+}
+
+export function createEnzymeAnnotation(enzymeId: number, payload: UpsertEnzymeAnnotationRequest) {
+  return request<EnzymeAnnotation>(`/api/enzymes/${enzymeId}/annotations`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateEnzymeAnnotation(enzymeId: number, annotationId: number, payload: UpsertEnzymeAnnotationRequest) {
+  return request<EnzymeAnnotation>(`/api/enzymes/${enzymeId}/annotations/${annotationId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteEnzymeAnnotation(enzymeId: number, annotationId: number) {
+  return request<void>(`/api/enzymes/${enzymeId}/annotations/${annotationId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function importUniProtAnnotations(enzymeId: number) {
+  return request<EnzymeAnnotation[]>(`/api/enzymes/${enzymeId}/annotations/import-uniprot`, {
+    method: 'POST',
+  })
+}
+
 export function saveMiniFoldEnzyme(payload: SaveMiniFoldEnzymeRequest) {
   return request<EnzymeEntry>('/api/enzymes/predicted/minifold', {
     method: 'POST',
@@ -177,7 +218,16 @@ export async function uploadEnzymeLiteratureFile(enzymeId: number, file: File) {
 
   if (!response.ok) {
     const text = await response.text().catch(() => null)
-    throw new Error(text || '上传本地文献失败')
+    let message = '上传本地附件失败'
+    try {
+      if (text) {
+        const body = JSON.parse(text)
+        message = body?.message ?? message
+      }
+    } catch (e) {
+      message = text || message
+    }
+    throw new Error(message)
   }
 
   return response.json() as Promise<LiteratureRecord>

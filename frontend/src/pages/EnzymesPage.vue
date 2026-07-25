@@ -18,12 +18,19 @@ import {
   Trash2,
   Sparkles,
   Upload,
-  X
+  X,
+  Plus,
+  Pencil,
+  Check,
+  AlertCircle,
+  Wand2,
+  MousePointerClick
 } from 'lucide-vue-next'
+import { createEmptyAnnotationForm, toAnnotationForm, useEnzymeAnnotations } from '@/composables/useEnzymeAnnotations'
 import { useLiterature } from '@/composables/useLiterature'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { deleteEnzyme, downloadLiteratureAttachment, getEnzymeStructure, listEnzymes } from '@/utils/api'
-import type { EnzymeEntry } from '@/types'
+import type { EnzymeAnnotation, EnzymeAnnotationType, EnzymeEntry } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
@@ -35,17 +42,43 @@ const {
   importingEnzymeId,
   importLocalLiterature,
 } = useLiterature()
+const {
+  annotations,
+  hasAnnotations,
+  listLoading: annotationsLoading,
+  saving: annotationSaving,
+  deletingId: deletingAnnotationId,
+  importing: importingAnnotations,
+  fetchAnnotations,
+  saveAnnotation,
+  removeAnnotation,
+  importFromUniProt,
+} = useEnzymeAnnotations()
 
 const selectedId = ref<number | null>(null)
 const searchQuery = ref('')
 const showFullscreenViewer = ref(false)
 const showImportLiteratureModal = ref(false)
+const showAnnotationModal = ref(false)
 const isDeleting = ref(false)
 const selectedLiteratureId = ref<number | null>(null)
+const selectedAnnotationId = ref<number | null>(null)
 const downloadingAttachmentId = ref<number | null>(null)
 const importLiteratureFile = ref<File | null>(null)
 const importLiteratureError = ref('')
+const annotationForm = ref(createEmptyAnnotationForm())
+const annotationError = ref('')
+const editingAnnotationId = ref<number | null>(null)
+const annotationNotice = ref('')
 const predictedStructureUrl = ref<string | null>(null)
+const structurePickMode = ref(false)
+const attemptedAutoImportAnnotationIds = new Set<number>()
+
+const annotationTypeOptions: Array<{ value: EnzymeAnnotationType; label: string; hint: string; color: string }> = [
+  { value: 'DOMAIN', label: '结构域', hint: '连续残基区间', color: '#3B82F6' },
+  { value: 'ACTIVE_SITE', label: '活性位点', hint: '关键催化残基', color: '#10B981' },
+  { value: 'MUTATION', label: '突变位点', hint: '关注的单个位点', color: '#F97316' },
+] as const
 
 const libraryTabs = [
   {
@@ -114,6 +147,40 @@ function openImportLiteratureModal() {
   showImportLiteratureModal.value = true
 }
 
+function resetAnnotationForm(type: EnzymeAnnotationType = 'DOMAIN') {
+  const option = annotationTypeOptions.find((item) => item.value === type)
+  annotationForm.value = {
+    ...createEmptyAnnotationForm(),
+    annotationType: type,
+    colorHex: option?.color || '#3B82F6',
+  }
+}
+
+function openAnnotationModal(type: EnzymeAnnotationType = 'DOMAIN') {
+  editingAnnotationId.value = null
+  annotationError.value = ''
+  annotationNotice.value = ''
+  resetAnnotationForm(type)
+  showAnnotationModal.value = true
+}
+
+function editAnnotation(annotation: EnzymeAnnotation) {
+  editingAnnotationId.value = annotation.id
+  annotationError.value = ''
+  annotationNotice.value = ''
+  annotationForm.value = toAnnotationForm(annotation)
+  showAnnotationModal.value = true
+}
+
+function closeAnnotationModal() {
+  if (annotationSaving.value) return
+  showAnnotationModal.value = false
+  annotationError.value = ''
+  annotationNotice.value = ''
+  editingAnnotationId.value = null
+  structurePickMode.value = false
+}
+
 function closeImportLiteratureModal() {
   if (importingEnzymeId.value) return
   showImportLiteratureModal.value = false
@@ -141,6 +208,89 @@ async function handleDownloadAttachment(literatureId: number) {
   } finally {
     downloadingAttachmentId.value = null
   }
+}
+
+async function handleSaveAnnotation() {
+  if (!selectedId.value) return
+  if (!annotationForm.value.startResidue || annotationForm.value.startResidue <= 0) {
+    annotationError.value = '请填写合法的起始残基位点'
+    return
+  }
+  if (annotationForm.value.annotationType === 'DOMAIN' && (!annotationForm.value.endResidue || annotationForm.value.endResidue < annotationForm.value.startResidue)) {
+    annotationError.value = '结构域的结束位点不能小于起始位点'
+    return
+  }
+
+  try {
+    annotationError.value = ''
+    annotationNotice.value = ''
+    const saved = await saveAnnotation(selectedId.value, annotationForm.value, editingAnnotationId.value)
+    selectedAnnotationId.value = saved.id
+    structurePickMode.value = false
+    showAnnotationModal.value = false
+  } catch (error) {
+    annotationError.value = error instanceof Error ? error.message : '注释保存失败，请重试'
+  }
+}
+
+async function handleDeleteAnnotation(annotation: EnzymeAnnotation) {
+  if (!selectedId.value) return
+  if (!confirm(`确定删除注释“${annotation.title}”吗？`)) return
+  try {
+    await removeAnnotation(selectedId.value, annotation.id)
+    if (selectedAnnotationId.value === annotation.id) {
+      selectedAnnotationId.value = annotations.value[0]?.id ?? null
+    }
+  } catch (error) {
+    console.error('删除注释失败', error)
+  }
+}
+
+async function handleImportUniProtAnnotations() {
+  if (!selectedId.value) return
+  annotationError.value = ''
+  annotationNotice.value = ''
+  try {
+    const imported = await importFromUniProt(selectedId.value)
+    if (imported.length) {
+      selectedAnnotationId.value = imported[0].id
+      annotationNotice.value = `已从 UniProt / PDB 导入 ${imported.length} 条注释`
+      return
+    }
+    annotationNotice.value = '没有新的 UniProt / PDB 注释可导入，可能已存在或该条目暂无可识别位点'
+  } catch (error) {
+    annotationError.value = error instanceof Error ? error.message : 'UniProt / PDB 注释导入失败'
+  }
+}
+
+function handlePickAnnotationFromStructure(type: EnzymeAnnotationType = 'ACTIVE_SITE') {
+  annotationError.value = ''
+  annotationNotice.value = '请在左侧 3D 结构中点击一个残基，系统会自动回填位点信息'
+  if (!showAnnotationModal.value || editingAnnotationId.value) {
+    openAnnotationModal(type)
+  } else {
+    annotationForm.value.annotationType = type
+  }
+  structurePickMode.value = true
+}
+
+function handleResiduePicked(payload: { residueNumber: number; chainLabel?: string; residueName?: string }) {
+  if (!showAnnotationModal.value) {
+    openAnnotationModal('ACTIVE_SITE')
+  }
+  annotationForm.value.startResidue = payload.residueNumber
+  annotationForm.value.endResidue = payload.residueNumber
+  annotationForm.value.chainLabel = payload.chainLabel || annotationForm.value.chainLabel
+  if (!annotationForm.value.title) {
+    const suffix = payload.residueName ? `${payload.residueName}${payload.residueNumber}` : `${payload.residueNumber}`
+    annotationForm.value.title = annotationForm.value.annotationType === 'MUTATION'
+      ? `突变位点 ${suffix}`
+      : `活性位点 ${suffix}`
+  }
+  if (annotationForm.value.annotationType === 'MUTATION' && !annotationForm.value.mutationLabel) {
+    annotationForm.value.mutationLabel = payload.residueName ? `${payload.residueName}${payload.residueNumber}` : `位点 ${payload.residueNumber}`
+  }
+  annotationNotice.value = `已选中残基 ${payload.residueNumber}${payload.chainLabel ? `（链 ${payload.chainLabel}）` : ''}`
 }
 
 async function handleImportLiterature() {
@@ -257,21 +407,127 @@ const selectedLiterature = computed(() => {
   if (selectedLiteratureId.value == null) return enzymeLiteratures.value[0]
   return enzymeLiteratures.value.find((item) => item.id === selectedLiteratureId.value) ?? enzymeLiteratures.value[0]
 })
+const selectedAnnotation = computed(() => {
+  if (!annotations.value.length) return null
+  if (selectedAnnotationId.value == null) return annotations.value[0]
+  return annotations.value.find((item) => item.id === selectedAnnotationId.value) ?? annotations.value[0]
+})
+const annotationLegend = computed(() => {
+  return annotationTypeOptions.map((option) => ({
+    ...option,
+    count: annotations.value.filter((item) => item.annotationType === option.value).length,
+  }))
+})
+const annotationSequenceSegments = computed(() => {
+  const sequenceLength = Math.max(selectedEnzyme.value?.sequenceLength || 0, 1)
+  return annotations.value.map((annotation) => {
+    const start = Math.max(1, annotation.startResidue)
+    const end = Math.max(start, annotation.endResidue)
+    const width = Math.max(((end - start + 1) / sequenceLength) * 100, 1.5)
+    return {
+      ...annotation,
+      left: `${((start - 1) / sequenceLength) * 100}%`,
+      width: `${Math.min(width, 100)}%`,
+    }
+  })
+})
+const selectedAnnotationSummary = computed(() => {
+  if (!selectedAnnotation.value) return null
+  if (selectedAnnotation.value.annotationType === 'DOMAIN') {
+    return `残基 ${selectedAnnotation.value.startResidue}-${selectedAnnotation.value.endResidue}`
+  }
+  if (selectedAnnotation.value.annotationType === 'ACTIVE_SITE') {
+    return `活性位点残基 ${selectedAnnotation.value.startResidue}`
+  }
+  return selectedAnnotation.value.mutationLabel || `突变位点 ${selectedAnnotation.value.startResidue}`
+})
+const annotationImportedCount = computed(() => annotations.value.filter((item) => ['UNIPROT', 'PDB'].includes(item.sourceDb || '')).length)
+const manualAnnotationCount = computed(() => annotations.value.filter((item) => !['UNIPROT', 'PDB'].includes(item.sourceDb || '')).length)
 
 watch(
   () => selectedId.value,
   (id) => {
+    selectedAnnotationId.value = null
+    if (id) {
+      fetchAnnotations(id)
+    } else {
+      selectedAnnotationId.value = null
+    }
     if (id && !isPredictedLibrary.value) {
       selectedLiteratureId.value = null
       fetchEnzymeLiteratures(id)
+    } else {
+      enzymeLiteratures.value = []
+      selectedLiteratureId.value = null
+    }
+    if (!id) {
+      selectedLiteratureId.value = null
     }
   }
+)
+
+watch(
+  () => annotationForm.value.annotationType,
+  (type) => {
+    const option = annotationTypeOptions.find((item) => item.value === type)
+    if (!editingAnnotationId.value && option) {
+      annotationForm.value.colorHex = option.color
+    }
+    if (type === 'MUTATION' && annotationForm.value.startResidue) {
+      annotationForm.value.endResidue = annotationForm.value.startResidue
+    }
+    if (type === 'ACTIVE_SITE' && annotationForm.value.startResidue && !annotationForm.value.endResidue) {
+      annotationForm.value.endResidue = annotationForm.value.startResidue
+    }
+  },
+)
+
+watch(
+  () => annotationForm.value.startResidue,
+  (startResidue) => {
+    if (!startResidue) return
+    if (annotationForm.value.annotationType !== 'DOMAIN') {
+      annotationForm.value.endResidue = startResidue
+    }
+  },
 )
 
 watch(
   () => enzymeLiteratures.value,
   (list) => {
     selectedLiteratureId.value = list.length ? list[0].id : null
+  },
+  { immediate: true },
+)
+
+watch(
+  () => annotations.value,
+  (list) => {
+    selectedAnnotationId.value = list.length ? (list.find((item) => item.id === selectedAnnotationId.value)?.id ?? list[0].id) : null
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [selectedEnzyme.value?.id, annotationsLoading.value, annotations.value.length, isPredictedLibrary.value] as const,
+  async ([enzymeId, loading, annotationCount, predicted]) => {
+    if (!enzymeId || loading || predicted || annotationCount > 0 || attemptedAutoImportAnnotationIds.has(enzymeId)) {
+      return
+    }
+    const enzyme = selectedEnzyme.value
+    if (!enzyme?.uniprotAccession) {
+      attemptedAutoImportAnnotationIds.add(enzymeId)
+      return
+    }
+    attemptedAutoImportAnnotationIds.add(enzymeId)
+    try {
+      const imported = await importFromUniProt(enzymeId)
+      if (imported.length) {
+        annotationNotice.value = `已自动从 UniProt / PDB 补充 ${imported.length} 条初始注释`
+      }
+    } catch (error) {
+      console.error('自动补充 UniProt / PDB 注释失败', error)
+    }
   },
   { immediate: true },
 )
@@ -325,6 +581,9 @@ onMounted(async () => {
     applyRouteSelection()
     if (selectedId.value && !isPredictedLibrary.value) {
       fetchEnzymeLiteratures(selectedId.value)
+    }
+    if (selectedId.value) {
+      fetchAnnotations(selectedId.value)
     }
   } catch {
     // Silent
@@ -563,58 +822,272 @@ onUnmounted(() => {
 
         <!-- Grid for Tabs/Sections -->
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
-          <!-- Structure Section -->
-          <div class="apple-card p-6 flex flex-col">
-            <div class="flex items-center justify-between mb-6">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                  <Dna :size="16" />
+          <div class="space-y-8">
+            <!-- Structure Section -->
+            <div class="apple-card p-6 flex flex-col">
+              <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                    <Dna :size="16" />
+                  </div>
+                  <h3 class="text-sm font-bold text-apple-text">3D 结构可视化</h3>
                 </div>
-                <h3 class="text-sm font-bold text-apple-text">3D 结构可视化</h3>
-              </div>
-              <div class="flex gap-2">
-                <button 
-                  @click="showFullscreenViewer = true"
-                  class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text transition-colors"
-                  title="全屏查看"
-                >
-                  <Maximize2 :size="14" />
-                </button>
-              </div>
-            </div>
-            
-            <div class="flex-1 min-h-[400px] relative group/viewer">
-              <StructureViewer 
-                :pdb-id="selectedViewerStructureId"
-                :url="selectedStructureUrl"
-                :source-db="selectedStructureSource"
-                :format="selectedStructureFormat"
-              />
-              
-              <div class="absolute top-4 left-4 flex flex-col gap-2">
-                <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
-                  {{ selectedStructureStatus }}
+                <div class="flex gap-2">
+                  <button
+                    @click="showFullscreenViewer = true"
+                    class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text transition-colors"
+                    title="全屏查看"
+                  >
+                    <Maximize2 :size="14" />
+                  </button>
                 </div>
               </div>
 
-              <div class="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
-                <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
-                  ID: {{ selectedStructureId }}
+              <div class="flex-1 min-h-[400px] relative group/viewer">
+                <StructureViewer
+                  :pdb-id="selectedViewerStructureId"
+                  :url="selectedStructureUrl"
+                  :source-db="selectedStructureSource"
+                  :format="selectedStructureFormat"
+                  :selected-annotation="selectedAnnotation"
+                  :pick-mode="structurePickMode"
+                  @residue-picked="handleResiduePicked"
+                />
+
+                <div class="absolute top-4 left-4 flex flex-col gap-2">
+                  <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
+                    {{ selectedStructureStatus }}
+                  </div>
+                  <div
+                    v-if="selectedAnnotation"
+                    class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text"
+                  >
+                    聚焦注释: {{ selectedAnnotation.title }}
+                  </div>
                 </div>
-                <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
-                  {{ selectedStructureType }}
+
+                <div class="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
+                  <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
+                    ID: {{ selectedStructureId }}
+                  </div>
+                  <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
+                    {{ selectedStructureType }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-4 grid grid-cols-2 gap-3">
+                <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
+                  <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Source</p>
+                  <p class="text-xs font-bold text-apple-text">{{ selectedStructureSource }}</p>
+                </div>
+                <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
+                  <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Structure ID</p>
+                  <p class="text-xs font-bold text-apple-text truncate">{{ selectedStructureId }}</p>
                 </div>
               </div>
             </div>
-            
-            <div class="mt-4 grid grid-cols-2 gap-3">
-              <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-                <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Source</p>
-                <p class="text-xs font-bold text-apple-text">{{ selectedStructureSource }}</p>
+
+            <div class="apple-card p-6 space-y-5">
+              <div class="flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-apple bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                    <Layers :size="16" />
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-apple-text">结构注释工具</h3>
+                    <p class="text-xs text-apple-secondary-text">标注结构域、活性位点与突变位点，并联动 3D 视图查看</p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    v-if="!isPredictedLibrary"
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
+                    :disabled="importingAnnotations"
+                    @click="handleImportUniProtAnnotations"
+                  >
+                    <Loader2 v-if="importingAnnotations" :size="12" class="animate-spin" />
+                    <Wand2 v-else :size="12" />
+                    从 UniProt / PDB 导入
+                  </button>
+                  <button
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
+                    @click="handlePickAnnotationFromStructure()"
+                  >
+                    <MousePointerClick :size="12" />
+                    从 3D 选点
+                  </button>
+                  <button
+                    v-for="option in annotationTypeOptions"
+                    :key="option.value"
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
+                    @click="openAnnotationModal(option.value)"
+                  >
+                    <Plus :size="12" />
+                    {{ option.label }}
+                  </button>
+                </div>
               </div>
-              <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-                <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Structure ID</p>
-                <p class="text-xs font-bold text-apple-text truncate">{{ selectedStructureId }}</p>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div
+                  v-for="item in annotationLegend"
+                  :key="item.value"
+                  class="p-3 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5"
+                >
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="w-3 h-3 rounded-full" :style="{ backgroundColor: item.color }"></span>
+                    <p class="text-xs font-bold text-apple-text">{{ item.label }}</p>
+                  </div>
+                  <p class="text-[10px] text-apple-secondary-text">{{ item.hint }}</p>
+                  <p class="mt-2 text-lg font-bold text-apple-text">{{ item.count }}</p>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-3 text-[10px]">
+                <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
+                  手动注释 <span class="ml-1 font-bold text-apple-text">{{ manualAnnotationCount }}</span>
+                </div>
+                <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
+                  自动导入（UniProt / PDB） <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
+                </div>
+                <div
+                  v-if="structurePickMode"
+                  class="px-3 py-2 rounded-apple border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-semibold"
+                >
+                  3D 选点模式开启中
+                </div>
+              </div>
+
+              <p v-if="annotationNotice" class="text-xs text-apple-blue">{{ annotationNotice }}</p>
+              <p v-else-if="annotationError && !showAnnotationModal" class="text-xs text-red-500">{{ annotationError }}</p>
+
+              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
+                <div class="flex items-center justify-between gap-4 mb-3">
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">序列注释视图</p>
+                    <p class="text-xs text-apple-secondary-text mt-1">点击下方彩色区段可同步选中对应注释，并在 3D 结构中聚焦查看。</p>
+                  </div>
+                  <p class="text-xs font-semibold text-apple-text">Length: {{ selectedEnzyme.sequenceLength }} aa</p>
+                </div>
+                <div class="relative h-12 rounded-full bg-white dark:bg-black/20 border border-apple-border overflow-hidden">
+                  <div
+                    v-for="segment in annotationSequenceSegments"
+                    :key="segment.id"
+                    class="absolute top-1/2 -translate-y-1/2 h-8 rounded-full border transition-all cursor-pointer"
+                    :class="selectedAnnotation?.id === segment.id ? 'ring-2 ring-offset-1 ring-apple-blue border-white/80' : 'border-white/40 hover:opacity-90'"
+                    :style="{ left: segment.left, width: segment.width, backgroundColor: segment.colorHex }"
+                    :title="`${segment.title} (${segment.startResidue}-${segment.endResidue})`"
+                    @click="selectedAnnotationId = segment.id"
+                  ></div>
+                </div>
+                <div class="mt-2 flex justify-between text-[10px] text-apple-secondary-text">
+                  <span>1</span>
+                  <span>{{ Math.max(1, Math.floor(selectedEnzyme.sequenceLength / 2)) }}</span>
+                  <span>{{ selectedEnzyme.sequenceLength }}</span>
+                </div>
+              </div>
+
+              <div v-if="annotationsLoading" class="py-10 flex flex-col items-center justify-center">
+                <Loader2 :size="24" class="animate-spin text-apple-blue mb-2" />
+                <p class="text-[10px] text-apple-secondary-text">读取注释中...</p>
+              </div>
+
+              <template v-else-if="hasAnnotations">
+                <div class="space-y-3">
+                  <button
+                    v-for="annotation in annotations"
+                    :key="annotation.id"
+                    @click="selectedAnnotationId = annotation.id"
+                    class="w-full text-left p-4 rounded-apple border bg-apple-background dark:bg-white/5 transition-all"
+                    :class="selectedAnnotation?.id === annotation.id ? 'border-apple-blue bg-apple-blue/5' : 'border-apple-border hover:border-apple-blue/30'"
+                  >
+                    <div class="flex items-start justify-between gap-4">
+                      <div class="space-y-2 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-white dark:bg-black/20 border border-apple-border text-apple-text">
+                            <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: annotation.colorHex }"></span>
+                            {{ annotation.annotationType === 'DOMAIN' ? '结构域' : annotation.annotationType === 'ACTIVE_SITE' ? '活性位点' : '突变位点' }}
+                          </span>
+                          <span class="text-[10px] text-apple-secondary-text uppercase tracking-widest">
+                            {{ annotation.startResidue }}{{ annotation.endResidue !== annotation.startResidue ? `-${annotation.endResidue}` : '' }}
+                          </span>
+                          <span v-if="annotation.chainLabel" class="text-[10px] text-apple-secondary-text uppercase tracking-widest">
+                            Chain {{ annotation.chainLabel }}
+                          </span>
+                          <span
+                            v-if="annotation.sourceDb"
+                            class="text-[9px] px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-apple-secondary-text"
+                          >
+                            {{ annotation.sourceDb }}
+                          </span>
+                        </div>
+                        <h4 class="text-sm font-bold text-apple-text">{{ annotation.title }}</h4>
+                        <p class="text-xs text-apple-secondary-text">
+                          {{ annotation.description || (annotation.annotationType === 'MUTATION' ? (annotation.mutationLabel || '未填写突变说明') : '未填写说明') }}
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text"
+                          @click.stop="editAnnotation(annotation)"
+                          title="编辑注释"
+                        >
+                          <Pencil :size="14" />
+                        </button>
+                        <button
+                          type="button"
+                          class="p-2 rounded-full hover:bg-red-500/10 text-red-500 disabled:opacity-50"
+                          :disabled="deletingAnnotationId === annotation.id"
+                          @click.stop="handleDeleteAnnotation(annotation)"
+                          title="删除注释"
+                        >
+                          <Loader2 v-if="deletingAnnotationId === annotation.id" :size="14" class="animate-spin" />
+                          <Trash2 v-else :size="14" />
+                        </button>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                <div v-if="selectedAnnotation" class="rounded-apple border border-apple-blue/20 bg-apple-blue/5 p-4 space-y-3">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前选中注释</p>
+                      <h4 class="mt-1 text-sm font-bold text-apple-text">{{ selectedAnnotation.title }}</h4>
+                    </div>
+                    <span class="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-[10px] font-bold text-apple-text">
+                      <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: selectedAnnotation.colorHex }"></span>
+                      {{ selectedAnnotationSummary }}
+                    </span>
+                  </div>
+                  <div class="flex flex-wrap gap-2 text-[10px]">
+                    <span
+                      v-if="selectedAnnotation.sourceDb"
+                      class="px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-apple-secondary-text"
+                    >
+                      来源: {{ selectedAnnotation.sourceDb }}
+                    </span>
+                    <span
+                      v-if="selectedAnnotation.sourceRef"
+                      class="px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-apple-secondary-text"
+                    >
+                      标识: {{ selectedAnnotation.sourceRef }}
+                    </span>
+                  </div>
+                  <p class="text-xs leading-6 text-apple-text">
+                    {{ selectedAnnotation.description || '该注释暂无补充说明。你可以点击右上角编辑按钮补充结构功能解释、实验依据或突变备注。' }}
+                  </p>
+                </div>
+              </template>
+
+              <div v-else class="p-8 text-center border-2 border-dashed border-apple-border rounded-apple">
+                <AlertCircle :size="24" class="mx-auto text-apple-secondary-text opacity-40 mb-3" />
+                <p class="text-xs text-apple-secondary-text italic">还没有任何结构注释。先添加一个结构域、活性位点或突变位点试试看。</p>
               </div>
             </div>
           </div>
@@ -839,8 +1312,13 @@ onUnmounted(() => {
         <div class="flex-1 p-8">
           <StructureViewer 
             v-if="selectedEnzyme"
-            :pdb-id="selectedStructureId"
+            :pdb-id="selectedViewerStructureId"
             :url="selectedStructureUrl"
+            :source-db="selectedStructureSource"
+            :format="selectedStructureFormat"
+            :selected-annotation="selectedAnnotation"
+            :pick-mode="structurePickMode"
+            @residue-picked="handleResiduePicked"
           />
         </div>
       </div>
@@ -904,6 +1382,130 @@ onUnmounted(() => {
               <Loader2 v-if="!!importingEnzymeId" :size="14" class="animate-spin" />
               <Upload v-else :size="14" />
               导入到当前酶
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <transition name="fade">
+      <div
+        v-if="showAnnotationModal"
+        class="fixed inset-0 z-[115] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        @click.self="closeAnnotationModal"
+      >
+        <div class="w-full max-w-2xl apple-card p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <h3 class="text-lg font-bold text-apple-text">{{ editingAnnotationId ? '编辑结构注释' : '新增结构注释' }}</h3>
+              <p class="text-sm text-apple-secondary-text">
+                为当前酶条目记录结构域、活性位点或突变位点。保存后可在 3D 结构中直接聚焦查看。
+              </p>
+              <p v-if="structurePickMode" class="text-xs text-amber-600 dark:text-amber-300">
+                当前已开启 3D 选点模式。请点击左侧结构中的残基，系统会自动把位点和链号带回表单。
+              </p>
+            </div>
+            <button
+              @click="closeAnnotationModal"
+              :disabled="annotationSaving"
+              class="w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text flex items-center justify-center disabled:opacity-50"
+            >
+              <X :size="16" />
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label class="space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">注释类型</span>
+              <div class="flex items-center gap-2">
+                <select v-model="annotationForm.annotationType" class="apple-input w-full">
+                  <option v-for="option in annotationTypeOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1 shrink-0"
+                  @click="handlePickAnnotationFromStructure(annotationForm.annotationType)"
+                >
+                  <MousePointerClick :size="12" />
+                  选点
+                </button>
+              </div>
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">注释标题</span>
+              <input v-model="annotationForm.title" type="text" class="apple-input w-full" placeholder="例如：催化核心区域 / Ser128 突变位点" />
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">起始残基</span>
+              <input v-model.number="annotationForm.startResidue" type="number" min="1" class="apple-input w-full" placeholder="例如 128" />
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">
+                {{ annotationForm.annotationType === 'MUTATION' ? '结束残基（自动等于起始位点）' : '结束残基' }}
+              </span>
+              <input
+                v-model.number="annotationForm.endResidue"
+                type="number"
+                min="1"
+                class="apple-input w-full"
+                :disabled="annotationForm.annotationType === 'MUTATION'"
+                :placeholder="annotationForm.annotationType === 'MUTATION' ? '突变位点固定为单残基' : '例如 196'"
+              />
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">链标识</span>
+              <input v-model="annotationForm.chainLabel" type="text" class="apple-input w-full" placeholder="可选，例如 A" />
+            </label>
+
+            <label class="space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">颜色</span>
+              <div class="flex items-center gap-3">
+                <input v-model="annotationForm.colorHex" type="color" class="h-10 w-14 rounded border border-apple-border bg-transparent" />
+                <input v-model="annotationForm.colorHex" type="text" class="apple-input flex-1" placeholder="#3B82F6" />
+              </div>
+            </label>
+
+            <label v-if="annotationForm.annotationType === 'MUTATION'" class="md:col-span-2 space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">突变说明</span>
+              <input v-model="annotationForm.mutationLabel" type="text" class="apple-input w-full" placeholder="例如：S128A / G45D" />
+            </label>
+
+            <label class="md:col-span-2 space-y-2">
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">备注说明</span>
+              <textarea
+                v-model="annotationForm.description"
+                rows="4"
+                class="apple-input w-full resize-none"
+                placeholder="可填写功能解释、实验依据、保守性分析结论等"
+              ></textarea>
+            </label>
+          </div>
+
+          <p v-if="annotationNotice" class="text-xs text-apple-blue">{{ annotationNotice }}</p>
+          <p v-if="annotationError" class="text-xs text-red-500">{{ annotationError }}</p>
+
+          <div class="flex justify-end gap-3">
+            <button
+              @click="closeAnnotationModal"
+              :disabled="annotationSaving"
+              class="apple-button-secondary !py-2 !px-4 text-xs disabled:opacity-50"
+            >
+              取消
+            </button>
+            <button
+              @click="handleSaveAnnotation"
+              :disabled="annotationSaving"
+              class="apple-button !py-2 !px-4 text-xs flex items-center gap-2 disabled:opacity-50"
+            >
+              <Loader2 v-if="annotationSaving" :size="14" class="animate-spin" />
+              <Check v-else :size="14" />
+              保存注释
             </button>
           </div>
         </div>

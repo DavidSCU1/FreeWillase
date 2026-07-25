@@ -42,6 +42,25 @@ export interface EnzymeEntry {
   createdAt: string
 }
 
+export type EnzymeAnnotationType = 'DOMAIN' | 'ACTIVE_SITE' | 'MUTATION'
+
+export interface EnzymeAnnotation {
+  id: number
+  enzymeId: number
+  annotationType: EnzymeAnnotationType
+  title: string
+  startResidue: number
+  endResidue: number
+  chainLabel?: string
+  mutationLabel?: string
+  colorHex: string
+  description?: string
+  sourceDb?: string
+  sourceRef?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface LiteratureRecord {
   id: number
   relationId?: number
