@@ -72,6 +72,7 @@ const editingAnnotationId = ref<number | null>(null)
 const annotationNotice = ref('')
 const predictedStructureUrl = ref<string | null>(null)
 const structurePickMode = ref(false)
+const attemptedAutoImportAnnotationIds = new Set<number>()
 
 const annotationTypeOptions: Array<{ value: EnzymeAnnotationType; label: string; hint: string; color: string }> = [
   { value: 'DOMAIN', label: '结构域', hint: '连续残基区间', color: '#3B82F6' },
@@ -253,12 +254,12 @@ async function handleImportUniProtAnnotations() {
     const imported = await importFromUniProt(selectedId.value)
     if (imported.length) {
       selectedAnnotationId.value = imported[0].id
-      annotationNotice.value = `已从 UniProt 导入 ${imported.length} 条注释`
+      annotationNotice.value = `已从 UniProt / PDB 导入 ${imported.length} 条注释`
       return
     }
-    annotationNotice.value = '没有新的 UniProt 注释可导入，可能已存在或该条目暂无可识别位点'
+    annotationNotice.value = '没有新的 UniProt / PDB 注释可导入，可能已存在或该条目暂无可识别位点'
   } catch (error) {
-    annotationError.value = error instanceof Error ? error.message : 'UniProt 注释导入失败'
+    annotationError.value = error instanceof Error ? error.message : 'UniProt / PDB 注释导入失败'
   }
 }
 
@@ -440,8 +441,8 @@ const selectedAnnotationSummary = computed(() => {
   }
   return selectedAnnotation.value.mutationLabel || `突变位点 ${selectedAnnotation.value.startResidue}`
 })
-const annotationImportedCount = computed(() => annotations.value.filter((item) => item.sourceDb === 'UNIPROT').length)
-const manualAnnotationCount = computed(() => annotations.value.filter((item) => item.sourceDb !== 'UNIPROT').length)
+const annotationImportedCount = computed(() => annotations.value.filter((item) => ['UNIPROT', 'PDB'].includes(item.sourceDb || '')).length)
+const manualAnnotationCount = computed(() => annotations.value.filter((item) => !['UNIPROT', 'PDB'].includes(item.sourceDb || '')).length)
 
 watch(
   () => selectedId.value,
@@ -503,6 +504,30 @@ watch(
   () => annotations.value,
   (list) => {
     selectedAnnotationId.value = list.length ? (list.find((item) => item.id === selectedAnnotationId.value)?.id ?? list[0].id) : null
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [selectedEnzyme.value?.id, annotationsLoading.value, annotations.value.length, isPredictedLibrary.value] as const,
+  async ([enzymeId, loading, annotationCount, predicted]) => {
+    if (!enzymeId || loading || predicted || annotationCount > 0 || attemptedAutoImportAnnotationIds.has(enzymeId)) {
+      return
+    }
+    const enzyme = selectedEnzyme.value
+    if (!enzyme?.uniprotAccession) {
+      attemptedAutoImportAnnotationIds.add(enzymeId)
+      return
+    }
+    attemptedAutoImportAnnotationIds.add(enzymeId)
+    try {
+      const imported = await importFromUniProt(enzymeId)
+      if (imported.length) {
+        annotationNotice.value = `已自动从 UniProt / PDB 补充 ${imported.length} 条初始注释`
+      }
+    } catch (error) {
+      console.error('自动补充 UniProt / PDB 注释失败', error)
+    }
   },
   { immediate: true },
 )
@@ -884,7 +909,7 @@ onUnmounted(() => {
                   >
                     <Loader2 v-if="importingAnnotations" :size="12" class="animate-spin" />
                     <Wand2 v-else :size="12" />
-                    从 UniProt 导入
+                    从 UniProt / PDB 导入
                   </button>
                   <button
                     type="button"
@@ -927,7 +952,7 @@ onUnmounted(() => {
                   手动注释 <span class="ml-1 font-bold text-apple-text">{{ manualAnnotationCount }}</span>
                 </div>
                 <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
-                  UniProt 自动导入 <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
+                  自动导入（UniProt / PDB） <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
                 </div>
                 <div
                   v-if="structurePickMode"

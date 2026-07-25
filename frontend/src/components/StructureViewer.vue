@@ -99,6 +99,10 @@ const clearViewer = async () => {
   await plugin.clear()
 }
 
+const requestViewerResize = () => {
+  plugin?.canvas3d?.requestResize()
+}
+
 const buildAnnotationSelection = (annotation?: EnzymeAnnotation | null) => {
   if (!annotation) return null
   const selection: Record<string, string | number> = annotation.annotationType === 'DOMAIN'
@@ -182,30 +186,43 @@ const loadStructure = async (id: string, sourceDb?: string) => {
     await clearViewer()
 
     if (normalizedSourceDb === 'PDB') {
-      await loaders.loadPdb(plugin, id.toUpperCase())
+      const pdbUrl = `https://files.rcsb.org/download/${id.toUpperCase()}.cif`
+      console.info('[StructureViewer] loading PDB structure', { id, pdbUrl })
+      await loaders.loadStructureFromUrl(plugin, pdbUrl, 'mmcif', false)
+      requestViewerResize()
       return
     }
 
     if (normalizedSourceDb === 'ALPHAFOLD' || normalizedSourceDb === 'ALPHAFOLDDB') {
-      await loaders.loadAlphaFoldDb(plugin, id)
+      const alphaFoldUrl = `https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`
+      console.info('[StructureViewer] loading AlphaFold structure', { id, alphaFoldUrl })
+      await loaders.loadStructureFromUrl(plugin, alphaFoldUrl, 'pdb', false)
+      requestViewerResize()
       return
     }
 
     try {
-      await loaders.loadPdb(plugin, id.toUpperCase())
+      const pdbUrl = `https://files.rcsb.org/download/${id.toUpperCase()}.cif`
+      console.info('[StructureViewer] trying PDB fallback', { id, pdbUrl })
+      await loaders.loadStructureFromUrl(plugin, pdbUrl, 'mmcif', false)
+      requestViewerResize()
     } catch (pdbErr) {
-      console.warn(`PDB ${id} not found, trying AlphaFold...`)
+      console.warn(`PDB ${id} not found, trying AlphaFold...`, pdbErr)
       try {
-        await loaders.loadAlphaFoldDb(plugin, id)
+        const alphaFoldUrl = `https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`
+        console.info('[StructureViewer] trying AlphaFold fallback', { id, alphaFoldUrl })
+        await loaders.loadStructureFromUrl(plugin, alphaFoldUrl, 'pdb', false)
+        requestViewerResize()
       } catch (afErr) {
+        console.error('[StructureViewer] all structure sources failed', { id, pdbErr, afErr })
         hasError.value = true
-        errorMessage.value = '看来这只酶很有“自由意志”'
+        errorMessage.value = '未能加载该酶的 3D 结构'
       }
     }
   } catch (e) {
     console.error('Structure loading error:', e)
     hasError.value = true
-    errorMessage.value = '结构解析出现了叛逆'
+    errorMessage.value = '结构解析失败'
   } finally {
     isLoading.value = false
   }
@@ -221,6 +238,7 @@ const loadByUrl = async (url: string) => {
     const normalizedUrl = url.toLowerCase()
     const isBinary = normalizedUrl.endsWith('.bcif')
     await loaders.loadStructureFromUrl(plugin, url, props.format || 'pdb', isBinary)
+    requestViewerResize()
   } catch (e) {
     console.error('URL structure loading error:', e)
     hasError.value = true
@@ -306,7 +324,7 @@ onUnmounted(() => {
           {{ hasError ? errorMessage : '等待加载结构' }}
         </h4>
         <p class="text-[10px] text-apple-secondary-text leading-relaxed max-w-[200px] mx-auto">
-          {{ hasError ? '它竟然在 PDB 和 AlphaFold 里都玩起了失踪。快去“预测接口”给它安排个“数字模型”吧！' : '请从左侧列表选择条目，看看它的“自由意志”长什么样。' }}
+          {{ hasError ? '当前结构文件未能成功加载。可以稍后重试，或检查该条目对应的 PDB / AlphaFold 标识是否有效。' : '请从左侧列表选择条目，查看该酶的三维结构。' }}
         </p>
       </div>
     </div>

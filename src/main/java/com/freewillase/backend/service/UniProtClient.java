@@ -88,7 +88,6 @@ public class UniProtClient {
         }
 
         URI uri = UriComponentsBuilder.fromHttpUrl(baseUrl + "/uniprotkb/" + normalizedAccession + ".json")
-                .queryParam("fields", "feature_count,features")
                 .build(true)
                 .toUri();
 
