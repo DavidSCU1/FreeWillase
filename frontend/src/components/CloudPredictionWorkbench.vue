@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Activity,
@@ -9,6 +9,7 @@ import {
   Dna,
   Download,
   FileText,
+  FolderPlus,
   Loader2,
   Microscope,
   Settings,
@@ -18,7 +19,8 @@ import {
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { usePredictionStore } from '@/stores/prediction'
-import type { PredictionProvider, PredictionTask } from '@/types'
+import { saveCloudPredictionEnzyme } from '@/utils/api'
+import type { EnzymeEntry, PredictionProvider, PredictionTask } from '@/types'
 
 const props = defineProps<{
   provider: Extract<PredictionProvider, 'nvidia' | 'trrosettarna'>
@@ -26,6 +28,12 @@ const props = defineProps<{
 
 const router = useRouter()
 const store = usePredictionStore()
+
+// --- Save to Library Refs ---
+const libraryEntryName = ref('')
+const isSavingToLibrary = ref(false)
+const saveToLibraryError = ref('')
+const savedLibraryEntry = ref<EnzymeEntry | null>(null)
 
 const providerMeta = computed(() => {
   if (props.provider === 'trrosettarna') {
@@ -211,6 +219,32 @@ function downloadStructure() {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+async function handleSaveToLibrary() {
+  const task = currentTask.value
+  if (!task?.result?.structure) return
+  if (!libraryEntryName.value.trim()) {
+    saveToLibraryError.value = '请先给这次预测结果起一个名字'
+    return
+  }
+
+  try {
+    isSavingToLibrary.value = true
+    saveToLibraryError.value = ''
+    savedLibraryEntry.value = await saveCloudPredictionEnzyme({
+      provider: task.provider,
+      name: libraryEntryName.value.trim(),
+      sequence: task.result.sequence || store.tasks.find(t => t.id === task.id)?.sequenceLength?.toString() || '', // In real app, sequence should be tracked properly
+      pdb: task.result.structure,
+      taskId: task.engineTaskId || task.result.taskId,
+      moleculeType: task.moleculeType
+    })
+  } catch (error) {
+    saveToLibraryError.value = error instanceof Error ? error.message : '入库失败，请稍后重试'
+  } finally {
+    isSavingToLibrary.value = false
+  }
 }
 
 watch(providerTasks, tasks => {
@@ -525,6 +559,45 @@ onUnmounted(() => {
                   <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">结果分析</label>
                   <div class="text-[11px] text-apple-secondary-text leading-relaxed bg-white/50 dark:bg-white/5 p-3 rounded-apple border border-apple-border italic">
                     "{{ currentTask.result.analysis }}"
+                  </div>
+                </div>
+
+                <div class="space-y-3">
+                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">确认入库</label>
+                  <div class="rounded-apple border border-apple-border bg-white/50 dark:bg-white/5 p-4 space-y-3">
+                    <input
+                      v-model="libraryEntryName"
+                      type="text"
+                      class="apple-input text-xs w-full"
+                      placeholder="例如：候选酶结构 A"
+                    />
+                    <p class="text-[11px] leading-relaxed text-apple-secondary-text">
+                      只有在你确认并命名后，这次预测结果才会进入“预测成果库”。
+                    </p>
+                    <p v-if="saveToLibraryError" class="text-[11px] font-bold text-red-500">{{ saveToLibraryError }}</p>
+                    <div v-if="savedLibraryEntry" class="rounded-apple border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+                      已入库为「{{ savedLibraryEntry.name }}」，编号 {{ savedLibraryEntry.code }}。
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        class="apple-button-primary !py-2 !px-4 text-xs flex items-center justify-center gap-2 disabled:opacity-50 w-full"
+                        :disabled="isSavingToLibrary || !currentTask.result.structure"
+                        @click="handleSaveToLibrary"
+                      >
+                        <Loader2 v-if="isSavingToLibrary" :size="14" class="animate-spin" />
+                        <FolderPlus v-else :size="14" />
+                        确认入库
+                      </button>
+                      <button
+                        v-if="savedLibraryEntry"
+                        type="button"
+                        class="apple-button-secondary !py-2 !px-4 text-xs w-full"
+                        @click="router.push({ path: '/library/predicted', query: { enzymeId: String(savedLibraryEntry.id) } })"
+                      >
+                        前往预测成果库
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -96,15 +96,15 @@ const libraryTabs = [
 ] as const
 
 const activeSourceType = computed(() => String(route.meta.librarySourceType || 'NCBI_IMPORT'))
-const isPredictedLibrary = computed(() => activeSourceType.value === 'MINIFOLD_PREDICTION')
+const isPredictedLibrary = computed(() => activeSourceType.value === 'PREDICTED')
 const libraryTitle = computed(() => String(route.meta.libraryTitle || '酶库中心'))
 const librarySubtitle = computed(() => String(route.meta.librarySubtitle || '管理、浏览与分析本地酶条目数据库'))
 const searchPlaceholder = computed(() => isPredictedLibrary.value ? '搜索内部编号或预测名称...' : '搜索 Accession 或条目名称...')
 const identifierLabel = computed(() => isPredictedLibrary.value ? '内部编号' : 'Accession')
-const selectedEntryBadge = computed(() => isPredictedLibrary.value ? 'MiniFold 入库条目' : 'Accession 导入条目')
+const selectedEntryBadge = computed(() => isPredictedLibrary.value ? '已入库的预测条目' : 'Accession 导入条目')
 const emptyTitle = computed(() => isPredictedLibrary.value ? '还没有确认入库的预测结果' : '这里还没有 accession 导入条目')
 const emptyDescription = computed(() => isPredictedLibrary.value
-  ? '先去 MiniFold 工作台拿到结果，确认命名后再放进预测成果库，这里就会出现。'
+  ? '先去预测工作台拿到结果，确认命名后再放进预测成果库，这里就会出现。'
   : '请先从 NCBI Accession 导入，再回来浏览这批正式入库的酶条目。')
 
 function revokePredictedStructureUrl() {
@@ -449,7 +449,7 @@ const selectedStructureType = computed(() => {
 const selectedStructureStatus = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return '等待加载'
-  if (isPredictedLibrary.value) return 'MiniFold 已确认入库'
+  if (isPredictedLibrary.value) return '预测已确认入库'
   if (isRnaEntry.value && !hasCuratedStructure.value) return 'RNA 结构暂未接入'
   if (enzyme.structureSourceDb === 'PDB') return 'Experimental (PDB)'
   if (enzyme.structureSourceDb === 'AlphaFold') return 'Predicted (AlphaFold)'
@@ -861,7 +861,7 @@ onUnmounted(() => {
                 <Database :size="14" />
                   <span class="text-[10px] font-bold uppercase tracking-widest">{{ selectedNcbiSourceLabel }}</span>
               </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? 'MiniFold Confirmed' : (selectedEnzyme.ncbiAccession || selectedEnzyme.accession) }}</p>
+              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? 'Local Confirmed' : (selectedEnzyme.ncbiAccession || selectedEnzyme.accession) }}</p>
             </div>
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
@@ -1388,7 +1388,7 @@ onUnmounted(() => {
             <div class="space-y-4">
               <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前来源</p>
-                <p class="mt-2 text-sm font-semibold text-apple-text">MiniFold 本地预测结果</p>
+                <p class="mt-2 text-sm font-semibold text-apple-text">本地/云端预测结果</p>
                 <p class="mt-2 text-xs leading-6 text-apple-secondary-text">
                   这个页面只保留已经由你确认命名并正式入库的预测结构。它们和 accession 导入条目分仓管理，避免后续检索、展示和结构判断时互相干扰。
                 </p>
@@ -1402,7 +1402,21 @@ onUnmounted(() => {
                     class="apple-button-secondary !py-2 !px-4 text-xs"
                     @click="router.push('/prediction/minifold')"
                   >
-                    回到 MiniFold 工作台
+                    去 MiniFold
+                  </button>
+                  <button
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-4 text-xs"
+                    @click="router.push('/prediction/esmfold')"
+                  >
+                    去 ESMFold
+                  </button>
+                  <button
+                    type="button"
+                    class="apple-button-secondary !py-2 !px-4 text-xs"
+                    @click="router.push('/prediction/trrosettarna')"
+                  >
+                    去 trRosettaRNA
                   </button>
                   <button
                     type="button"

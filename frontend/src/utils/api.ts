@@ -186,6 +186,20 @@ export function saveMiniFoldEnzyme(payload: SaveMiniFoldEnzymeRequest) {
   })
 }
 
+export function saveCloudPredictionEnzyme(payload: {
+  provider: string
+  name: string
+  sequence: string
+  pdb: string
+  taskId?: string
+  moleculeType: string
+}) {
+  return request<EnzymeEntry>('/api/enzymes/predicted/cloud', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function importEnzymeLiteratureFile(enzymeId: number, filePath: string) {
   return request<LiteratureRecord>(`/api/enzymes/${enzymeId}/literatures/import`, {
     method: 'POST',

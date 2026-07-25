@@ -6,6 +6,7 @@ import com.freewillase.backend.dto.MatchLiteratureRequest;
 import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportLiteratureFileRequest;
 import com.freewillase.backend.dto.SaveMiniFoldEnzymeRequest;
+import com.freewillase.backend.dto.SaveCloudPredictionRequest;
 import com.freewillase.backend.dto.UpsertEnzymeAnnotationRequest;
 import com.freewillase.backend.service.LiteratureMatchService;
 import com.freewillase.backend.service.NcbiImportService;
@@ -33,6 +34,11 @@ public class EnzymeController {
     @PostMapping("/predicted/minifold")
     public EnzymeEntryResponse saveMiniFoldPrediction(@RequestBody SaveMiniFoldEnzymeRequest request) {
         return ncbiImportService.saveMiniFoldResult(request);
+    }
+
+    @PostMapping("/predicted/cloud")
+    public EnzymeEntryResponse saveCloudPrediction(@RequestBody SaveCloudPredictionRequest request) {
+        return ncbiImportService.saveCloudPredictionResult(request);
     }
 
     @GetMapping("/{id}/structure")

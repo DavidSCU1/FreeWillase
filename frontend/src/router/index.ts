@@ -49,9 +49,9 @@ const routes: RouteRecordRaw[] = [
     name: 'library-predicted',
     component: EnzymesPage,
     meta: {
-      librarySourceType: 'MINIFOLD_PREDICTION',
+      librarySourceType: 'PREDICTED',
       libraryTitle: '预测成果库',
-      librarySubtitle: '只展示已经过你确认并正式入库的 MiniFold 预测结果，不和 accession 导入条目混放。',
+      librarySubtitle: '展示你确认并正式入库的所有预测结果（包括 MiniFold, ESMFold, trRosettaRNA 等），独立于 Accession 导入条目。',
     },
   },
   {

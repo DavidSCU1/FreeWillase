@@ -287,6 +287,7 @@ export async function predictStructure(config: PredictionConfig, request: Predic
         modelName: 'esmfold',
         format: 'pdb',
         structure: pdb,
+        sequence: normalizedSequence,
         plddt: body.plddt,
         ptm: body.ptm,
       }
@@ -298,6 +299,7 @@ export async function predictStructure(config: PredictionConfig, request: Predic
       modelName: 'esmfold',
       format: 'pdb',
       structure: text,
+      sequence: normalizedSequence,
     }
   }
 
@@ -330,6 +332,7 @@ export async function predictStructure(config: PredictionConfig, request: Predic
       modelName: 'trRosettaRNA',
       format: 'pdb',
       structure: body.pdbContent,
+      sequence: normalizedSequence,
       resultPageUrl: body.resultPageUrl
     }
   }

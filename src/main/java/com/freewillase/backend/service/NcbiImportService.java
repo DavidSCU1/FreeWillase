@@ -12,6 +12,7 @@ import com.freewillase.backend.dto.EnzymeEntryResponse;
 import com.freewillase.backend.dto.ImportTaskItemResponse;
 import com.freewillase.backend.dto.ImportTaskResponse;
 import com.freewillase.backend.dto.SaveMiniFoldEnzymeRequest;
+import com.freewillase.backend.dto.SaveCloudPredictionRequest;
 import com.freewillase.backend.dto.UpsertEnzymeAnnotationRequest;
 import com.freewillase.backend.mapper.EnzymeAnnotationMapper;
 import com.freewillase.backend.mapper.EnzymeCrossRefMapper;
@@ -54,6 +55,7 @@ public class NcbiImportService {
 
     public static final String SOURCE_TYPE_NCBI_IMPORT = "NCBI_IMPORT";
     public static final String SOURCE_TYPE_MINIFOLD_PREDICTION = "MINIFOLD_PREDICTION";
+    public static final String SOURCE_TYPE_CLOUD_PREDICTION = "CLOUD_PREDICTION";
     public static final String MOLECULE_TYPE_PROTEIN = "protein";
     public static final String MOLECULE_TYPE_RNA = "RNA";
     private static final Set<String> SUPPORTED_ANNOTATION_TYPES = Set.of("DOMAIN", "ACTIVE_SITE", "MUTATION");
@@ -257,7 +259,11 @@ public class NcbiImportService {
         LambdaQueryWrapper<EnzymeEntry> query = new LambdaQueryWrapper<EnzymeEntry>()
                 .orderByDesc(EnzymeEntry::getCreatedAt);
         if (sourceType != null && !sourceType.isBlank()) {
-            query.eq(EnzymeEntry::getSourceType, sourceType.trim());
+            if ("PREDICTED".equalsIgnoreCase(sourceType.trim())) {
+                query.in(EnzymeEntry::getSourceType, SOURCE_TYPE_MINIFOLD_PREDICTION, SOURCE_TYPE_CLOUD_PREDICTION);
+            } else {
+                query.eq(EnzymeEntry::getSourceType, sourceType.trim());
+            }
         }
 
         List<EnzymeEntry> entries = enzymeEntryMapper.selectList(query);
@@ -345,6 +351,66 @@ public class NcbiImportService {
                 1
         );
         saveCrossReference(entry.getId(), "MINIFOLD", "TASK_ID", taskId, null, 1);
+
+        return getEnzymeResponse(entry.getId());
+    }
+
+    @Transactional
+    public EnzymeEntryResponse saveCloudPredictionResult(SaveCloudPredictionRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("缺少预测入库数据");
+        }
+        if (request.getName() == null || request.getName().trim().isEmpty()) {
+            throw new IllegalArgumentException("请先为预测结果起一个名字");
+        }
+        String sequence = normalizeSequence(request.getSequence());
+        if (sequence.isEmpty()) {
+            throw new IllegalArgumentException("预测序列不能为空");
+        }
+        if (request.getPdb() == null || request.getPdb().trim().isEmpty()) {
+            throw new IllegalArgumentException("结构内容为空，无法入库");
+        }
+
+        String provider = request.getProvider() != null ? request.getProvider().toUpperCase() : "UNKNOWN";
+        String taskId = defaultString(request.getTaskId()).trim();
+        
+        if (!taskId.isEmpty()) {
+            EnzymeCrossRef existingTaskRef = enzymeCrossRefMapper.selectOne(new LambdaQueryWrapper<EnzymeCrossRef>()
+                    .eq(EnzymeCrossRef::getRefDb, provider)
+                    .eq(EnzymeCrossRef::getRefType, "TASK_ID")
+                    .eq(EnzymeCrossRef::getRefValue, taskId)
+                    .last("LIMIT 1"));
+            if (existingTaskRef != null) {
+                return getEnzymeResponse(existingTaskRef.getEnzymeId());
+            }
+        }
+
+        String providerDisplay = provider.equals("TRROSETTARNA") ? "trRosettaRNA" : provider.equals("NVIDIA") ? "NVIDIA ESMFold" : provider;
+
+        LocalDateTime now = LocalDateTime.now();
+        EnzymeEntry entry = EnzymeEntry.builder()
+                .code("PRED_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                .name(request.getName().trim())
+                .organism(providerDisplay + " 云端预测")
+                .description("由 " + providerDisplay + " 预测生成的 " + defaultString(request.getMoleculeType()) + " 结构。")
+                .sourceType(SOURCE_TYPE_CLOUD_PREDICTION)
+                .status("ACTIVE")
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+        enzymeEntryMapper.insert(entry);
+
+        savePrimarySequence(entry.getId(), sequence, sequence.length(), provider);
+        writeMiniFoldStructureFile(entry.getCode(), request.getPdb());
+        saveStructure(
+                entry.getId(),
+                "PREDICTED",
+                taskId.isEmpty() ? entry.getCode() : taskId,
+                providerDisplay,
+                "/api/enzymes/" + entry.getId() + "/structure",
+                1
+        );
+        saveCrossReference(entry.getId(), provider, "TASK_ID", taskId, null, 1);
 
         return getEnzymeResponse(entry.getId());
     }
@@ -1130,8 +1196,14 @@ public class NcbiImportService {
                 return MOLECULE_TYPE_PROTEIN;
             }
         }
-        if (primarySequence != null && "NCBI_NUCLEOTIDE".equalsIgnoreCase(primarySequence.getSourceType())) {
-            return MOLECULE_TYPE_RNA;
+        if (primarySequence != null) {
+            String seqSource = primarySequence.getSourceType();
+            if ("NCBI_NUCLEOTIDE".equalsIgnoreCase(seqSource) || "TRROSETTARNA".equalsIgnoreCase(seqSource)) {
+                return MOLECULE_TYPE_RNA;
+            }
+            if ("NVIDIA".equalsIgnoreCase(seqSource) || "MINIFOLD".equalsIgnoreCase(seqSource)) {
+                return MOLECULE_TYPE_PROTEIN;
+            }
         }
         return MOLECULE_TYPE_PROTEIN;
     }
