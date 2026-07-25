@@ -348,6 +348,7 @@ const selectedEnzyme = computed(() => {
   return enzymes.value.find((item) => item.id === selectedId.value) ?? enzymes.value[0]
 })
 
+const isRnaEntry = computed(() => selectedEnzyme.value?.moleculeType === 'RNA')
 const selectedSequenceUnit = computed(() => selectedEnzyme.value?.moleculeType === 'RNA' ? 'nt' : 'aa')
 const canImportUniProtAnnotations = computed(() => !isPredictedLibrary.value && selectedEnzyme.value?.moleculeType !== 'RNA')
 const selectedNcbiSourceLabel = computed(() => {
@@ -363,15 +364,54 @@ const selectedSecondarySourceValue = computed(() => {
   if (selectedEnzyme.value?.moleculeType === 'RNA') return '暂未接入'
   return selectedEnzyme.value?.uniprotAccession || '-'
 })
+const hasCuratedStructure = computed(() => {
+  const enzyme = selectedEnzyme.value
+  if (!enzyme) return false
+  return Boolean(enzyme.structureUrl || enzyme.structureId || enzyme.pdbId)
+})
+const canRenderStructureViewer = computed(() => {
+  if (isPredictedLibrary.value) return Boolean(predictedStructureUrl.value)
+  if (isRnaEntry.value) return hasCuratedStructure.value
+  return true
+})
+const selectedStructureCardTitle = computed(() => isRnaEntry.value ? 'RNA 结构与预测' : '3D 结构可视化')
+const selectedStructureSectionDescription = computed(() => {
+  if (isRnaEntry.value) {
+    return '当前优先展示 RNA 条目的结构可用性与后续预测建议。'
+  }
+  return '自动展示蛋白结构，并支持与注释联动查看。'
+})
+const selectedAnnotationToolTitle = computed(() => isRnaEntry.value ? 'RNA 序列注释工具' : '结构注释工具')
+const selectedAnnotationToolDescription = computed(() => {
+  if (isRnaEntry.value) {
+    return '当前支持按序列区间手动标注 RNA 功能区、关键位点和突变位点。'
+  }
+  return '标注结构域、活性位点与突变位点，并联动 3D 视图查看'
+})
+const selectedImportedAnnotationLabel = computed(() => {
+  if (isRnaEntry.value) return '自动导入（RNA 注释暂未接入）'
+  return '自动导入（UniProt / PDB）'
+})
+const canPickAnnotationFromStructure = computed(() => !isRnaEntry.value && canRenderStructureViewer.value)
+const rnaStructureSupportHint = computed(() => {
+  const length = selectedEnzyme.value?.sequenceLength || 0
+  if (!isRnaEntry.value) return ''
+  if (length > 400) {
+    return `当前项目内置的 RNA 预测流程仅支持长度 <= 400 nt，本条序列长度为 ${length} nt。`
+  }
+  return `当前尚未为该 RNA 条目自动接入 3D 结构来源；这条序列长度为 ${length} nt，后续可以补接 RNA 预测入口。`
+})
 
 const selectedStructureId = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return ''
   if (isPredictedLibrary.value) return enzyme.code || enzyme.structureId || 'MINIFOLD-LOCAL'
+  if (isRnaEntry.value && !hasCuratedStructure.value) return '暂未提供'
   return enzyme.structureId || enzyme.uniprotAccession || enzyme.accession
 })
 
 const selectedViewerStructureId = computed(() => {
+  if (isRnaEntry.value && !hasCuratedStructure.value) return undefined
   if (isPredictedLibrary.value) return undefined
   return selectedStructureId.value || undefined
 })
@@ -387,6 +427,7 @@ const selectedStructureUrl = computed(() => {
 const selectedStructureSource = computed(() => {
   const enzyme = selectedEnzyme.value
   if (isPredictedLibrary.value) return 'LOCAL'
+  if (isRnaEntry.value && !hasCuratedStructure.value) return 'RNA_PENDING'
   return enzyme?.structureSourceDb || 'AUTO'
 })
 
@@ -409,6 +450,7 @@ const selectedStructureStatus = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return '等待加载'
   if (isPredictedLibrary.value) return 'MiniFold 已确认入库'
+  if (isRnaEntry.value && !hasCuratedStructure.value) return 'RNA 结构暂未接入'
   if (enzyme.structureSourceDb === 'PDB') return 'Experimental (PDB)'
   if (enzyme.structureSourceDb === 'AlphaFold') return 'Predicted (AlphaFold)'
   if (enzyme.structureSourceDb) return `Curated (${enzyme.structureSourceDb})`
@@ -831,9 +873,11 @@ onUnmounted(() => {
             <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
               <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
                 <Dna :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'Structure' : 'PDB' }}</span>
+                <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'Structure' : (isRnaEntry ? 'RNA 结构' : 'PDB') }}</span>
               </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedEnzyme.pdbId || selectedEnzyme.structureId || '-' }}</p>
+              <p class="text-sm font-semibold text-apple-text truncate">
+                {{ isRnaEntry ? (hasCuratedStructure ? (selectedEnzyme.pdbId || selectedEnzyme.structureId || '已接入') : '暂未接入') : (selectedEnzyme.pdbId || selectedEnzyme.structureId || '-') }}
+              </p>
             </div>
           </div>
 
@@ -883,10 +927,14 @@ onUnmounted(() => {
                   <div class="w-8 h-8 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center">
                     <Dna :size="16" />
                   </div>
-                  <h3 class="text-sm font-bold text-apple-text">3D 结构可视化</h3>
+                  <div>
+                    <h3 class="text-sm font-bold text-apple-text">{{ selectedStructureCardTitle }}</h3>
+                    <p class="text-xs text-apple-secondary-text mt-1">{{ selectedStructureSectionDescription }}</p>
+                  </div>
                 </div>
                 <div class="flex gap-2">
                   <button
+                    v-if="canRenderStructureViewer"
                     @click="showFullscreenViewer = true"
                     class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text transition-colors"
                     title="全屏查看"
@@ -897,34 +945,62 @@ onUnmounted(() => {
               </div>
 
               <div class="flex-1 min-h-[400px] relative group/viewer">
-                <StructureViewer
-                  :pdb-id="selectedViewerStructureId"
-                  :url="selectedStructureUrl"
-                  :source-db="selectedStructureSource"
-                  :format="selectedStructureFormat"
-                  :selected-annotation="selectedAnnotation"
-                  :pick-mode="structurePickMode"
-                  @residue-picked="handleResiduePicked"
-                />
+                <template v-if="canRenderStructureViewer">
+                  <StructureViewer
+                    :pdb-id="selectedViewerStructureId"
+                    :url="selectedStructureUrl"
+                    :source-db="selectedStructureSource"
+                    :format="selectedStructureFormat"
+                    :selected-annotation="selectedAnnotation"
+                    :pick-mode="structurePickMode"
+                    @residue-picked="handleResiduePicked"
+                  />
 
-                <div class="absolute top-4 left-4 flex flex-col gap-2">
-                  <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
-                    {{ selectedStructureStatus }}
+                  <div class="absolute top-4 left-4 flex flex-col gap-2">
+                    <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
+                      {{ selectedStructureStatus }}
+                    </div>
+                    <div
+                      v-if="selectedAnnotation"
+                      class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text"
+                    >
+                      聚焦注释: {{ selectedAnnotation.title }}
+                    </div>
                   </div>
-                  <div
-                    v-if="selectedAnnotation"
-                    class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text"
-                  >
-                    聚焦注释: {{ selectedAnnotation.title }}
-                  </div>
-                </div>
 
-                <div class="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
-                  <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
-                    ID: {{ selectedStructureId }}
+                  <div class="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
+                    <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
+                      ID: {{ selectedStructureId }}
+                    </div>
+                    <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
+                      {{ selectedStructureType }}
+                    </div>
                   </div>
-                  <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
-                    {{ selectedStructureType }}
+                </template>
+                <div
+                  v-else
+                  class="h-full min-h-[400px] rounded-apple border border-dashed border-apple-border bg-apple-background/40 dark:bg-white/[0.03] p-6 flex flex-col justify-between"
+                >
+                  <div class="space-y-3">
+                    <div class="inline-flex px-3 py-1.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-[10px] font-bold text-apple-secondary-text">
+                      {{ selectedStructureStatus }}
+                    </div>
+                    <div>
+                      <p class="text-sm font-semibold text-apple-text">当前没有可直接展示的 RNA 三维结构</p>
+                      <p class="mt-2 text-xs leading-6 text-apple-secondary-text">{{ rnaStructureSupportHint }}</p>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="p-4 rounded-apple border border-apple-border bg-white/70 dark:bg-black/20">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前状态</p>
+                      <p class="mt-2 text-sm font-semibold text-apple-text">{{ selectedStructureStatus }}</p>
+                    </div>
+                    <div class="p-4 rounded-apple border border-apple-border bg-white/70 dark:bg-black/20">
+                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">后续建议</p>
+                      <p class="mt-2 text-sm font-semibold text-apple-text">
+                        {{ selectedEnzyme.sequenceLength > 400 ? '建议后续补接外部 RNA 结构来源' : '可补接 RNA 预测入口或人工上传结构' }}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -948,8 +1024,8 @@ onUnmounted(() => {
                     <Layers :size="16" />
                   </div>
                   <div>
-                    <h3 class="text-sm font-bold text-apple-text">结构注释工具</h3>
-                    <p class="text-xs text-apple-secondary-text">标注结构域、活性位点与突变位点，并联动 3D 视图查看</p>
+                    <h3 class="text-sm font-bold text-apple-text">{{ selectedAnnotationToolTitle }}</h3>
+                    <p class="text-xs text-apple-secondary-text">{{ selectedAnnotationToolDescription }}</p>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -965,6 +1041,7 @@ onUnmounted(() => {
                     从 UniProt / PDB 导入
                   </button>
                   <button
+                    v-if="canPickAnnotationFromStructure"
                     type="button"
                     class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
                     @click="handlePickAnnotationFromStructure()"
@@ -1005,7 +1082,7 @@ onUnmounted(() => {
                   手动注释 <span class="ml-1 font-bold text-apple-text">{{ manualAnnotationCount }}</span>
                 </div>
                 <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
-                  {{ selectedEnzyme.moleculeType === 'RNA' ? '自动导入（暂未接入）' : '自动导入（UniProt / PDB）' }} <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
+                  {{ selectedImportedAnnotationLabel }} <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
                 </div>
                 <div
                   v-if="structurePickMode"
@@ -1017,12 +1094,17 @@ onUnmounted(() => {
 
               <p v-if="annotationNotice" class="text-xs text-apple-blue">{{ annotationNotice }}</p>
               <p v-else-if="annotationError && !showAnnotationModal" class="text-xs text-red-500">{{ annotationError }}</p>
+              <p v-if="isRnaEntry" class="text-xs text-apple-secondary-text">
+                RNA 条目当前先支持基于整条序列的手动区间标注；自动 RNA 注释源和 3D 联动后续再接入。
+              </p>
 
               <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
                 <div class="flex items-center justify-between gap-4 mb-3">
                   <div>
                     <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">序列注释视图</p>
-                    <p class="text-xs text-apple-secondary-text mt-1">点击下方彩色区段可同步选中对应注释，并在 3D 结构中聚焦查看。</p>
+                    <p class="text-xs text-apple-secondary-text mt-1">
+                      {{ isRnaEntry ? '当前按 RNA 全长序列坐标展示注释区间，便于先做功能区整理。' : '点击下方彩色区段可同步选中对应注释，并在 3D 结构中聚焦查看。' }}
+                    </p>
                   </div>
                   <p class="text-xs font-semibold text-apple-text">Length: {{ selectedEnzyme.sequenceLength }} {{ selectedSequenceUnit }}</p>
                 </div>
