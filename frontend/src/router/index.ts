@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import HomePage from '@/pages/HomePage.vue'
 import EnzymesPage from '@/pages/EnzymesPage.vue'
 import ImportsPage from '@/pages/ImportsPage.vue'
+import LibraryEntryPage from '@/pages/LibraryEntryPage.vue'
 import LiteraturePage from '@/pages/LiteraturePage.vue'
 import PredictionPage from '@/pages/PredictionPage.vue'
 import MiniFoldPage from '@/pages/MiniFoldPage.vue'
@@ -32,7 +33,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/library',
     name: 'library',
-    redirect: '/library/imported',
+    component: LibraryEntryPage,
   },
   {
     path: '/library/imported',

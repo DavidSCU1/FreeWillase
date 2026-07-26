@@ -24,7 +24,8 @@ import {
   Check,
   AlertCircle,
   Wand2,
-  MousePointerClick
+  MousePointerClick,
+  ArrowRight
 } from 'lucide-vue-next'
 import { createEmptyAnnotationForm, toAnnotationForm, useEnzymeAnnotations } from '@/composables/useEnzymeAnnotations'
 import { useLiterature } from '@/composables/useLiterature'
@@ -80,21 +81,6 @@ const annotationTypeOptions: Array<{ value: EnzymeAnnotationType; label: string;
   { value: 'MUTATION', label: '突变位点', hint: '关注的单个位点', color: '#F97316' },
 ] as const
 
-const libraryTabs = [
-  {
-    label: '导入酶库',
-    to: '/library/imported',
-    hint: 'Accession 导入',
-    sourceType: 'NCBI_IMPORT',
-  },
-  {
-    label: '预测成果库',
-    to: '/library/predicted',
-    hint: 'MiniFold 入库',
-    sourceType: 'MINIFOLD_PREDICTION',
-  },
-] as const
-
 const activeSourceType = computed(() => String(route.meta.librarySourceType || 'NCBI_IMPORT'))
 const isPredictedLibrary = computed(() => activeSourceType.value === 'PREDICTED')
 const libraryTitle = computed(() => String(route.meta.libraryTitle || '酶库中心'))
@@ -102,7 +88,6 @@ const librarySubtitle = computed(() => String(route.meta.librarySubtitle || '管
 const searchPlaceholder = computed(() => isPredictedLibrary.value ? '搜索内部编号或预测名称...' : '搜索 Accession 或条目名称...')
 const identifierLabel = computed(() => isPredictedLibrary.value ? '内部编号' : 'Accession')
 const selectedEntryBadge = computed(() => isPredictedLibrary.value ? '已入库的预测条目' : 'Accession 导入条目')
-const emptyTitle = computed(() => isPredictedLibrary.value ? '还没有确认入库的预测结果' : '这里还没有 accession 导入条目')
 const emptyDescription = computed(() => isPredictedLibrary.value
   ? '先去预测工作台拿到结果，确认命名后再放进预测成果库，这里就会出现。'
   : '请先从 NCBI Accession 导入，再回来浏览这批正式入库的酶条目。')
@@ -116,7 +101,7 @@ function revokePredictedStructureUrl() {
 }
 
 async function handleDelete(id: number) {
-  if (confirm('确定要放走这只酶吗？一旦放归野外（删除），它的自由意志就不再受你掌控了。')) {
+  if (confirm('确定要移除该条目吗？删除后将无法恢复。')) {
     isDeleting.value = true
     try {
       await deleteEnzyme(id)
@@ -342,7 +327,7 @@ function applyRouteSelection() {
   if (selectedId.value != null && enzymes.value.some(item => item.id === selectedId.value)) {
     return
   }
-  selectedId.value = enzymes.value[0]?.id ?? null
+  selectedId.value = null
 }
 
 const filteredEnzymes = computed(() => {
@@ -358,22 +343,13 @@ const filteredEnzymes = computed(() => {
 
 const selectedEnzyme = computed(() => {
   if (!enzymes.value.length) return null
-  if (selectedId.value == null) return enzymes.value[0]
-  return enzymes.value.find((item) => item.id === selectedId.value) ?? enzymes.value[0]
+  if (selectedId.value == null) return null
+  return enzymes.value.find((item) => item.id === selectedId.value) ?? null
 })
 
 const isRnaEntry = computed(() => selectedEnzyme.value?.moleculeType === 'RNA')
 const selectedSequenceUnit = computed(() => selectedEnzyme.value?.moleculeType === 'RNA' ? 'nt' : 'aa')
 const canImportAutomaticAnnotations = computed(() => !isPredictedLibrary.value)
-const canImportUniProtAnnotations = computed(() => !isPredictedLibrary.value && !isRnaEntry.value)
-const selectedNcbiSourceLabel = computed(() => {
-  if (isPredictedLibrary.value) return 'SOURCE'
-  return selectedEnzyme.value?.moleculeType === 'RNA' ? 'NCBI Nucleotide' : 'NCBI Protein'
-})
-const selectedSecondarySourceLabel = computed(() => {
-  if (isPredictedLibrary.value) return 'Library Code'
-  return selectedEnzyme.value?.moleculeType === 'RNA' ? 'RNA 注释源' : 'UniProt'
-})
 const importedAnnotationSourceLabels = computed(() => {
   const labels = new Set<string>()
   annotations.value.forEach((item) => {
@@ -383,6 +359,11 @@ const importedAnnotationSourceLabels = computed(() => {
   })
   return Array.from(labels)
 })
+
+const selectedSecondarySourceLabel = computed(() => {
+  if (isPredictedLibrary.value) return 'Library Code'
+  return selectedEnzyme.value?.moleculeType === 'RNA' ? 'RNA 注释源' : 'UniProt'
+})
 const selectedSecondarySourceValue = computed(() => {
   if (isPredictedLibrary.value) return selectedEnzyme.value?.code || '-'
   if (selectedEnzyme.value?.moleculeType === 'RNA') {
@@ -390,6 +371,7 @@ const selectedSecondarySourceValue = computed(() => {
   }
   return selectedEnzyme.value?.uniprotAccession || '-'
 })
+
 const hasCuratedStructure = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return false
@@ -413,10 +395,6 @@ const selectedAnnotationToolDescription = computed(() => {
     return '支持从 NCBI Nucleotide 导入基础 RNA 注释，并按序列区间继续手动补充。'
   }
   return '标注结构域、活性位点与突变位点，并联动 3D 视图查看'
-})
-const selectedImportedAnnotationLabel = computed(() => {
-  if (isRnaEntry.value) return '自动导入（NCBI Nucleotide）'
-  return '自动导入（UniProt / PDB）'
 })
 const selectedAnnotationImportButtonLabel = computed(() => {
   if (isRnaEntry.value) return '从 NCBI 导入'
@@ -481,11 +459,6 @@ const selectedStructureFormat = computed<'pdb' | 'mmcif'>(() => {
   return 'pdb'
 })
 
-const selectedStructureType = computed(() => {
-  const enzyme = selectedEnzyme.value
-  return enzyme?.structureType || 'AUTO'
-})
-
 const selectedStructureStatus = computed(() => {
   const enzyme = selectedEnzyme.value
   if (!enzyme) return '等待加载'
@@ -507,7 +480,6 @@ const selectedNcbiUrl = computed(() => {
     : `https://www.ncbi.nlm.nih.gov/protein/${enzyme.accession}`
 })
 
-const selectedUniprotUrl = computed(() => isPredictedLibrary.value ? undefined : selectedEnzyme.value?.uniprotUrl)
 const selectedLiterature = computed(() => {
   if (!enzymeLiteratures.value.length) return null
   if (selectedLiteratureId.value == null) return enzymeLiteratures.value[0]
@@ -537,18 +509,6 @@ const annotationSequenceSegments = computed(() => {
     }
   })
 })
-const selectedAnnotationSummary = computed(() => {
-  if (!selectedAnnotation.value) return null
-  if (selectedAnnotation.value.annotationType === 'DOMAIN') {
-    return `残基 ${selectedAnnotation.value.startResidue}-${selectedAnnotation.value.endResidue}`
-  }
-  if (selectedAnnotation.value.annotationType === 'ACTIVE_SITE') {
-    return `活性位点残基 ${selectedAnnotation.value.startResidue}`
-  }
-  return selectedAnnotation.value.mutationLabel || `突变位点 ${selectedAnnotation.value.startResidue}`
-})
-const annotationImportedCount = computed(() => annotations.value.filter((item) => ['UNIPROT', 'PDB', 'NCBI_NUCLEOTIDE'].includes(item.sourceDb || '')).length)
-const manualAnnotationCount = computed(() => annotations.value.filter((item) => !['UNIPROT', 'PDB', 'NCBI_NUCLEOTIDE'].includes(item.sourceDb || '')).length)
 
 watch(
   () => selectedId.value,
@@ -556,17 +516,12 @@ watch(
     selectedAnnotationId.value = null
     if (id) {
       fetchAnnotations(id)
-    } else {
-      selectedAnnotationId.value = null
     }
     if (id && !isPredictedLibrary.value) {
       selectedLiteratureId.value = null
       fetchEnzymeLiteratures(id)
     } else {
       enzymeLiteratures.value = []
-      selectedLiteratureId.value = null
-    }
-    if (!id) {
       selectedLiteratureId.value = null
     }
   }
@@ -617,41 +572,24 @@ watch(
 watch(
   () => [selectedEnzyme.value?.id, annotationsLoading.value, annotations.value.length, isPredictedLibrary.value] as const,
   async ([enzymeId, loading, annotationCount, predicted]) => {
-    // #region debug-point D:auto-import-gate
-    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'D', location: 'EnzymesPage.vue:autoImportWatch:514', msg: '[DEBUG] auto import watch evaluated', data: { enzymeId, loading, annotationCount, predicted, hasAttempted: enzymeId ? attemptedAutoImportAnnotationIds.has(enzymeId) : false, uniprotAccession: selectedEnzyme.value?.uniprotAccession || null, pdbId: selectedEnzyme.value?.pdbId || null }, ts: Date.now() }) }).catch(() => {})
-    // #endregion
     if (!enzymeId || loading || predicted || annotationCount > 0 || attemptedAutoImportAnnotationIds.has(enzymeId)) {
       return
     }
     const enzyme = selectedEnzyme.value
-    if (!enzyme) {
-      return
-    }
+    if (!enzyme) return
     if (enzyme.moleculeType !== 'RNA' && !enzyme.uniprotAccession && !enzyme.pdbId) {
-      // #region debug-point D:auto-import-skipped
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'D', location: 'EnzymesPage.vue:autoImportWatch:520', msg: '[DEBUG] auto import skipped for missing uniprot accession', data: { enzymeId, pdbId: enzyme?.pdbId || null, structureId: enzyme?.structureId || null }, ts: Date.now() }) }).catch(() => {})
-      // #endregion
       attemptedAutoImportAnnotationIds.add(enzymeId)
       return
     }
     attemptedAutoImportAnnotationIds.add(enzymeId)
     try {
-      // #region debug-point E:auto-import-start
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:526', msg: '[DEBUG] auto import started', data: { enzymeId, uniprotAccession: enzyme.uniprotAccession, pdbId: enzyme.pdbId || null }, ts: Date.now() }) }).catch(() => {})
-      // #endregion
       const imported = await importAutomatically(enzymeId)
-      // #region debug-point E:auto-import-result
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:528', msg: '[DEBUG] auto import finished', data: { enzymeId, importedCount: imported.length, sourceDbs: imported.map((item) => item.sourceDb || null) }, ts: Date.now() }) }).catch(() => {})
-      // #endregion
       if (imported.length) {
         annotationNotice.value = enzyme.moleculeType === 'RNA'
           ? `已自动从 NCBI Nucleotide 补充 ${imported.length} 条初始 RNA 注释`
           : `已自动从 UniProt / PDB 补充 ${imported.length} 条初始注释`
       }
     } catch (error) {
-      // #region debug-point E:auto-import-error
-      fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'E', location: 'EnzymesPage.vue:autoImportWatch:533', msg: '[DEBUG] auto import failed', data: { enzymeId, error: error instanceof Error ? error.message : String(error) }, ts: Date.now() }) }).catch(() => {})
-      // #endregion
       console.error('自动补充注释失败', error)
     }
   },
@@ -700,16 +638,6 @@ watch(
   { immediate: true },
 )
 
-watch(
-  () => selectedEnzyme.value,
-  (enzyme) => {
-    // #region debug-point A:selected-enzyme
-    fetch('http://127.0.0.1:7777/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'structure-empty-annotations', runId: 'post-fix', hypothesisId: 'A', location: 'EnzymesPage.vue:selectedEnzymeWatch:560', msg: '[DEBUG] selected enzyme payload prepared for viewer', data: enzyme ? { enzymeId: enzyme.id, accession: enzyme.accession, structureId: enzyme.structureId, structureSourceDb: enzyme.structureSourceDb, structureUrl: enzyme.structureUrl, pdbId: enzyme.pdbId, uniprotAccession: enzyme.uniprotAccession, selectedViewerStructureId: selectedViewerStructureId.value, selectedStructureUrl: selectedStructureUrl.value, selectedStructureSource: selectedStructureSource.value } : null, ts: Date.now() }) }).catch(() => {})
-    // #endregion
-  },
-  { immediate: true, deep: true },
-)
-
 onMounted(async () => {
   try {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
@@ -732,769 +660,592 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full space-y-8">
-    <!-- Header with Search and Filter -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div class="space-y-3">
-        <div class="space-y-1">
-          <h1 class="text-3xl font-bold tracking-tight text-apple-text">{{ libraryTitle }}</h1>
-          <p class="text-apple-secondary-text text-sm">{{ librarySubtitle }}</p>
+  <div class="max-w-4xl mx-auto w-full pb-20 px-4">
+    <!-- 视图 1: 独立的居中列表界面 (当 !selectedId 时展示) -->
+    <template v-if="!selectedId">
+      <div class="min-h-[80vh] flex flex-col items-center justify-center py-12">
+        <!-- 列表头部：极简设计 -->
+        <div class="text-center mb-16 space-y-4">
+          <h1 class="text-5xl font-extrabold tracking-tight text-apple-text">{{ libraryTitle }}</h1>
+          <p class="text-apple-secondary-text text-xl max-w-2xl mx-auto">{{ librarySubtitle }}</p>
         </div>
-        <div class="flex flex-wrap gap-2">
+
+        <!-- 搜索与操作栏：居中布局 -->
+        <div class="w-full max-w-2xl flex flex-col sm:flex-row items-center gap-4 mb-12">
+          <div class="relative flex-1 group w-full">
+            <Search class="absolute left-5 top-1/2 -translate-y-1/2 text-apple-secondary-text group-focus-within:text-apple-blue transition-colors" :size="20" />
+            <input 
+              v-model="searchQuery"
+              type="text" 
+              :placeholder="searchPlaceholder"
+              class="apple-input pl-14 pr-6 py-5 text-lg w-full shadow-apple-sm focus:shadow-apple-md transition-all border-none bg-white dark:bg-white/5"
+            />
+          </div>
           <button
-            v-for="tab in libraryTabs"
-            :key="tab.to"
             type="button"
-            class="rounded-apple border px-4 py-2 text-left transition-all"
-            :class="activeSourceType === tab.sourceType ? 'border-apple-blue bg-apple-blue/5 text-apple-blue' : 'border-apple-border text-apple-secondary-text hover:text-apple-text hover:bg-apple-background'"
-            @click="router.push(tab.to)"
+            class="apple-button-secondary !py-5 !px-10 text-base flex items-center gap-2 whitespace-nowrap shadow-apple-sm hover:shadow-apple-md transition-all shrink-0"
+            @click="router.push('/library')"
           >
-            <p class="text-xs font-bold">{{ tab.label }}</p>
-            <p class="text-[10px] uppercase tracking-widest">{{ tab.hint }}</p>
+            <Database :size="18" />
+            切换仓库
           </button>
         </div>
-      </div>
-      <div class="flex items-center gap-3">
-        <div class="relative w-64">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 text-apple-secondary-text" :size="14" />
-          <input 
-            v-model="searchQuery"
-            type="text" 
-            :placeholder="searchPlaceholder"
-            class="apple-input pl-9 pr-4 py-2 text-xs"
-          />
-        </div>
-        <button class="apple-button-secondary flex items-center gap-2 !py-2 !px-4 text-xs">
-          <Filter :size="14" />
-          筛选器
-        </button>
-      </div>
-    </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-8 items-start">
-      <!-- Left List Sidebar -->
-      <div class="space-y-6 sticky top-24 h-[calc(100vh-280px)] flex flex-col">
-        <div class="apple-card overflow-hidden flex flex-col flex-1">
-          <div class="p-4 border-b border-apple-border flex items-center justify-between bg-black/5 dark:bg-white/5">
-            <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">酶条目列表</span>
-            <span class="text-[10px] font-bold text-apple-blue bg-apple-blue/10 px-2 py-0.5 rounded-full">{{ filteredEnzymes.length }}</span>
+        <!-- 条目列表卡片 -->
+        <div class="w-full max-w-2xl apple-card overflow-hidden shadow-apple-2xl border-none bg-white dark:bg-white/5">
+          <div class="px-8 py-6 border-b border-apple-border flex items-center justify-between bg-black/[0.02] dark:bg-white/[0.02]">
+            <div class="flex items-center gap-3">
+              <FlaskConical :size="20" class="text-apple-blue" />
+              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">可用条目</span>
+            </div>
+            <span class="text-[10px] font-bold text-apple-blue bg-apple-blue/10 px-4 py-1.5 rounded-full uppercase tracking-wider">
+              共 {{ filteredEnzymes.length }} 项
+            </span>
           </div>
-          <div class="flex-1 overflow-y-auto p-2 space-y-1 no-scrollbar">
+          
+          <div class="divide-y divide-apple-border/50">
             <button
               v-for="enzyme in filteredEnzymes"
               :key="enzyme.id"
               @click="selectedId = enzyme.id"
-              class="w-full text-left p-3 rounded-apple transition-all group relative overflow-hidden"
-              :class="selectedEnzyme?.id === enzyme.id 
-                ? 'bg-apple-blue text-white shadow-lg shadow-apple-blue/20' 
-                : 'hover:bg-black/5 dark:hover:bg-white/5'"
+              class="w-full text-left px-8 py-10 transition-all hover:bg-apple-blue/[0.03] group flex items-center justify-between gap-8"
             >
-              <div class="flex justify-between items-start mb-1">
-                <span class="text-xs font-bold" :class="selectedEnzyme?.id === enzyme.id ? 'text-white' : 'text-apple-blue'">
-                  {{ isPredictedLibrary ? enzyme.code : enzyme.accession }}
-                </span>
-                <div class="flex items-center gap-2">
-                  <span v-if="selectedEnzyme?.id === enzyme.id" class="text-[10px] font-medium opacity-70 italic">
-                    {{ enzyme.sequenceLength }} {{ enzyme.moleculeType === 'RNA' ? 'nt' : 'aa' }}
+              <div class="flex-1 space-y-4">
+                <div class="flex items-center gap-4">
+                  <span class="text-[10px] font-bold text-apple-blue bg-apple-blue/5 px-3 py-1 rounded border border-apple-blue/10 uppercase tracking-widest">
+                    {{ isPredictedLibrary ? enzyme.code : enzyme.accession }}
                   </span>
-                  <button 
-                    @click.stop="handleDelete(enzyme.id)"
-                    class="p-1 rounded-full hover:bg-white/20 transition-colors"
-                    :class="selectedEnzyme?.id === enzyme.id ? 'text-white' : 'text-red-500 opacity-0 group-hover:opacity-100'"
-                    title="删除"
-                  >
-                    <Trash2 :size="10" />
-                  </button>
+                  <div class="h-1 w-1 rounded-full bg-apple-border"></div>
+                  <span class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest opacity-60">
+                    {{ enzyme.moleculeType === 'RNA' ? 'RNA' : 'Protein' }} • {{ enzyme.sequenceLength }} {{ enzyme.moleculeType === 'RNA' ? 'nt' : 'aa' }}
+                  </span>
                 </div>
+                <h3 class="text-2xl font-bold text-apple-text group-hover:text-apple-blue transition-colors">
+                  {{ enzyme.proteinName }}
+                </h3>
+                <p class="text-sm text-apple-secondary-text flex items-center gap-2 opacity-80">
+                  <Tag :size="16" class="opacity-40" />
+                  {{ enzyme.organismName }}
+                </p>
               </div>
-              <p class="text-xs font-semibold line-clamp-2 leading-snug" :class="selectedEnzyme?.id === enzyme.id ? 'text-white' : 'text-apple-text'">
-                {{ enzyme.proteinName }}
-              </p>
-              <p class="mt-2 text-[10px] truncate" :class="selectedEnzyme?.id === enzyme.id ? 'text-white/70' : 'text-apple-secondary-text'">
-                {{ enzyme.organismName }}
-              </p>
+              
+              <div class="w-14 h-14 rounded-full bg-apple-background dark:bg-white/5 border border-apple-border flex items-center justify-center group-hover:bg-apple-blue group-hover:text-white group-hover:border-apple-blue transition-all shadow-sm group-hover:shadow-apple-md">
+                <ArrowRight :size="24" />
+              </div>
             </button>
             
-            <div v-if="!filteredEnzymes.length" class="p-12 text-center">
-              <FlaskConical :size="32" class="mx-auto text-apple-secondary-text opacity-20 mb-4" />
-              <p class="text-xs text-apple-secondary-text">这只酶可能逃出了自由意志的包围圈</p>
+            <div v-if="!filteredEnzymes.length" class="p-32 text-center space-y-8">
+              <div class="w-24 h-24 bg-black/5 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto text-apple-secondary-text opacity-10">
+                <FlaskConical :size="48" />
+              </div>
+              <div class="space-y-3">
+                <p class="text-2xl font-bold text-apple-text">未找到相关条目</p>
+                <p class="text-sm text-apple-secondary-text max-w-xs mx-auto leading-relaxed">{{ searchQuery ? '请尝试使用其他关键词重新搜索' : emptyDescription }}</p>
+              </div>
             </div>
           </div>
         </div>
       </div>
+    </template>
 
-      <!-- Right Detail Content -->
-      <div v-if="selectedEnzyme" class="space-y-8 pb-20">
-        <!-- Main Detail Card -->
-        <div class="apple-card p-8">
-          <div class="flex flex-col md:flex-row justify-between items-start gap-6">
-            <div class="space-y-4 flex-1">
-              <div class="flex items-center gap-3">
-                <span class="px-2 py-1 rounded-full bg-apple-blue/10 text-apple-blue text-[10px] font-bold uppercase tracking-widest">
-                  {{ selectedEntryBadge }}
-                </span>
-                <span class="text-xs font-medium text-apple-secondary-text">ID: {{ selectedEnzyme.id }}</span>
+    <!-- 视图 2: 居中的详情界面 (当 selectedId 存在时展示) -->
+    <template v-else-if="selectedEnzyme">
+      <!-- 详情页导航栏 -->
+      <div class="flex items-center justify-between gap-6 py-12">
+        <div class="flex items-center gap-8">
+          <button 
+            @click="selectedId = null"
+            class="w-14 h-14 rounded-full bg-white dark:bg-white/5 border border-apple-border flex items-center justify-center text-apple-text hover:bg-apple-blue hover:text-white hover:border-apple-blue transition-all shadow-apple-sm group"
+            title="返回条目列表"
+          >
+            <X :size="24" class="group-hover:rotate-90 transition-transform duration-300" />
+          </button>
+          <div class="space-y-2">
+            <div class="flex items-center gap-3">
+              <span class="px-3 py-1 rounded-full bg-apple-blue/10 text-apple-blue text-[10px] font-bold uppercase tracking-widest border border-apple-blue/20">
+                {{ selectedEntryBadge }}
+              </span>
+              <div class="h-1 w-1 rounded-full bg-apple-border"></div>
+              <span class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest opacity-60">{{ activeSourceType === 'PREDICTED' ? 'AI 预测资产' : '实验数据资产' }}</span>
+            </div>
+            <h1 class="text-4xl font-extrabold tracking-tight text-apple-text">{{ selectedEnzyme.proteinName }}</h1>
+          </div>
+        </div>
+        
+        <div class="flex items-center gap-4">
+          <button 
+            @click="handleDelete(selectedEnzyme.id)"
+            :disabled="isDeleting"
+            class="apple-button-secondary !text-red-500 !border-red-500/20 hover:!bg-red-500/5 flex items-center gap-2 !py-4 !px-8 text-sm disabled:opacity-50 shadow-apple-sm"
+          >
+            <Loader2 v-if="isDeleting" :size="16" class="animate-spin" />
+            <Trash2 v-else :size="16" />
+            移除条目
+          </button>
+          <a
+            v-if="selectedNcbiUrl"
+            :href="selectedNcbiUrl"
+            target="_blank"
+            rel="noreferrer"
+            class="apple-button-secondary flex items-center gap-2 !py-4 !px-8 text-sm shadow-apple-sm"
+          >
+            <ExternalLink :size="16" />
+            NCBI 源
+          </a>
+        </div>
+      </div>
+
+      <!-- 条目元数据概览：极简行内布局 -->
+      <div class="flex flex-wrap items-center justify-center gap-x-12 gap-y-6 px-10 py-8 mb-12 rounded-apple-2xl bg-black/[0.02] dark:bg-white/[0.02] border border-apple-border/50 text-sm">
+        <div class="flex items-center gap-3">
+          <Layers :size="16" class="text-apple-secondary-text opacity-50" />
+          <span class="text-apple-secondary-text">序列长度:</span>
+          <span class="font-bold text-apple-text">{{ selectedEnzyme.sequenceLength }} {{ selectedSequenceUnit }}</span>
+        </div>
+        <div class="h-4 w-px bg-apple-border/50 hidden md:block"></div>
+        <div class="flex items-center gap-3">
+          <Tag :size="16" class="text-apple-secondary-text opacity-50" />
+          <span class="text-apple-secondary-text">物种:</span>
+          <span class="font-bold text-apple-text italic">{{ selectedEnzyme.organismName }}</span>
+        </div>
+        <div class="h-4 w-px bg-apple-border/50 hidden md:block"></div>
+        <div class="flex items-center gap-3">
+          <Database :size="16" class="text-apple-secondary-text opacity-50" />
+          <span class="text-apple-secondary-text">{{ selectedSecondarySourceLabel }}:</span>
+          <span class="font-bold text-apple-text">{{ selectedSecondarySourceValue }}</span>
+        </div>
+      </div>
+
+      <!-- 详情内容垂直堆叠：三个版块大小均匀居中 -->
+      <div class="space-y-16">
+        <!-- 1. 3D 结构可视化 (核心版块) -->
+        <div class="apple-card overflow-hidden shadow-apple-2xl border-none flex flex-col min-h-[800px] bg-white dark:bg-white/5">
+          <div class="px-10 py-8 border-b border-apple-border flex items-center justify-between bg-black/[0.02] dark:bg-white/[0.02]">
+            <div class="flex items-center gap-5">
+              <div class="w-14 h-14 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center shadow-inner">
+                <Dna :size="28" />
               </div>
-              <h2 class="text-3xl font-bold tracking-tight text-apple-text leading-tight">
-                {{ selectedEnzyme.proteinName }}
-              </h2>
-              <div class="flex flex-wrap gap-4 text-sm">
-                <div class="flex items-center gap-2 text-apple-secondary-text">
-                  <Database :size="16" />
-                  <span>{{ identifierLabel }}: <span class="text-apple-text font-semibold">{{ isPredictedLibrary ? selectedEnzyme.code : selectedEnzyme.accession }}</span></span>
-                </div>
-                <div class="flex items-center gap-2 text-apple-secondary-text">
-                  <Tag :size="16" />
-                  <span>Organism: <span class="text-apple-text font-semibold italic">{{ selectedEnzyme.organismName }}</span></span>
-                </div>
+              <div>
+                <h3 class="text-xl font-bold text-apple-text">{{ selectedStructureCardTitle }}</h3>
+                <p class="text-xs text-apple-secondary-text mt-1 opacity-80">{{ selectedStructureSectionDescription }}</p>
               </div>
             </div>
-            <div class="flex gap-3">
-              <button 
-                @click="selectedEnzyme && handleDelete(selectedEnzyme.id)"
-                :disabled="isDeleting"
-                class="apple-button-secondary !text-red-500 !border-red-500/20 hover:!bg-red-500/5 flex items-center gap-2 !py-2 !px-4 text-xs disabled:opacity-50"
+            <div class="flex items-center gap-4">
+              <div class="px-5 py-2.5 rounded-full bg-apple-background dark:bg-white/5 border border-apple-border text-[10px] font-bold text-apple-text shadow-apple-sm uppercase tracking-wider">
+                {{ selectedStructureStatus }}
+              </div>
+              <button
+                v-if="canRenderStructureViewer"
+                @click="showFullscreenViewer = true"
+                class="w-14 h-14 rounded-full bg-white dark:bg-white/5 border border-apple-border flex items-center justify-center text-apple-secondary-text hover:bg-apple-blue hover:text-white hover:border-apple-blue transition-all shadow-apple-sm"
+                title="全屏分析"
               >
-                <Loader2 v-if="isDeleting" :size="14" class="animate-spin" />
-                <Trash2 v-else :size="14" />
-                删除条目
+                <Maximize2 :size="20" />
               </button>
-              <a
-                v-if="selectedNcbiUrl"
-                :href="selectedNcbiUrl"
-                target="_blank"
-                rel="noreferrer"
-                class="apple-button-secondary flex items-center gap-2 !py-2 !px-4 text-xs"
+            </div>
+          </div>
+
+          <div class="flex-1 relative group/viewer bg-apple-background dark:bg-black/20">
+            <template v-if="canRenderStructureViewer">
+              <StructureViewer
+                :pdb-id="selectedViewerStructureId"
+                :url="selectedStructureUrl"
+                :source-db="selectedStructureSource"
+                :format="selectedStructureFormat"
+                :selected-annotation="selectedAnnotation"
+                :pick-mode="structurePickMode"
+                @residue-picked="handleResiduePicked"
+              />
+
+              <!-- Overlay Info -->
+              <div class="absolute bottom-10 left-10 right-10 flex items-center justify-between pointer-events-none">
+                <div class="flex gap-4">
+                  <div class="px-6 py-3 rounded-full bg-white/95 dark:bg-black/90 backdrop-blur shadow-apple-2xl border border-apple-border text-[10px] font-bold text-apple-text pointer-events-auto flex items-center gap-2">
+                    <Info :size="14" class="text-apple-blue" />
+                    Structure ID: {{ selectedStructureId }}
+                  </div>
+                  <div v-if="selectedAnnotation" class="px-6 py-3 rounded-full bg-apple-blue text-white shadow-apple-2xl text-[10px] font-bold pointer-events-auto flex items-center gap-2">
+                    <MapPin :size="14" />
+                    聚焦: {{ selectedAnnotation.title }}
+                  </div>
+                </div>
+              </div>
+            </template>
+            
+            <div v-else class="h-full p-24 flex flex-col items-center justify-center text-center space-y-10">
+              <div class="w-40 h-40 bg-apple-blue/5 rounded-full flex items-center justify-center text-apple-blue/20">
+                <Dna :size="80" />
+              </div>
+              <div class="max-w-md space-y-4">
+                <p class="text-3xl font-bold text-apple-text">暂无可用的 3D 结构</p>
+                <p class="text-base text-apple-secondary-text leading-relaxed">{{ rnaStructureSupportHint }}</p>
+              </div>
+              <button
+                v-if="canLaunchRnaPrediction"
+                type="button"
+                class="apple-button !py-5 !px-12 text-base flex items-center gap-2 shadow-apple-2xl transition-transform hover:scale-105"
+                @click="handleOpenRnaPrediction"
               >
-                <ExternalLink :size="14" />
-                NCBI 详情
-              </a>
+                <Sparkles :size="20" />
+                {{ selectedRnaPredictionButtonLabel }}
+              </button>
             </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
-            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
-                <Layers :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">序列长度</span>
-              </div>
-              <p class="text-2xl font-bold text-apple-text">{{ selectedEnzyme.sequenceLength }} <span class="text-sm font-medium opacity-50">{{ selectedSequenceUnit }}</span></p>
-            </div>
-            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
-                <MapPin :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">物种 Tax ID</span>
-              </div>
-              <p class="text-2xl font-bold text-apple-text">{{ selectedEnzyme.taxId || '-' }}</p>
-            </div>
-            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border overflow-hidden">
-              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
-                <Info :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">序列哈希</span>
-              </div>
-              <p class="text-xs font-mono text-apple-secondary-text truncate">{{ selectedEnzyme.sequenceHash }}</p>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
-                <Database :size="14" />
-                  <span class="text-[10px] font-bold uppercase tracking-widest">{{ selectedNcbiSourceLabel }}</span>
-              </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ isPredictedLibrary ? 'Local Confirmed' : (selectedEnzyme.ncbiAccession || selectedEnzyme.accession) }}</p>
-            </div>
-            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
-                <Tag :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">{{ selectedSecondarySourceLabel }}</span>
-              </div>
-              <p class="text-sm font-semibold text-apple-text truncate">{{ selectedSecondarySourceValue }}</p>
-            </div>
-            <div class="p-5 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-              <div class="flex items-center gap-2 mb-3 text-apple-secondary-text">
-                <Dna :size="14" />
-                <span class="text-[10px] font-bold uppercase tracking-widest">{{ isPredictedLibrary ? 'Structure' : (isRnaEntry ? 'RNA 结构' : 'PDB') }}</span>
-              </div>
-              <p class="text-sm font-semibold text-apple-text truncate">
-                {{ isRnaEntry ? (hasCuratedStructure ? (selectedEnzyme.pdbId || selectedEnzyme.structureId || '已接入') : '暂未接入') : (selectedEnzyme.pdbId || selectedEnzyme.structureId || '-') }}
-              </p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap gap-3 mt-6">
-            <a
-              v-if="selectedNcbiUrl"
-              :href="selectedNcbiUrl"
-              target="_blank"
-              rel="noreferrer"
-              class="text-xs font-semibold text-apple-blue hover:underline"
-            >
-              查看 NCBI 页面
-            </a>
-            <a
-              v-if="selectedUniprotUrl && canImportUniProtAnnotations"
-              :href="selectedUniprotUrl"
-              target="_blank"
-              rel="noreferrer"
-              class="text-xs font-semibold text-apple-blue hover:underline"
-            >
-              查看 UniProt 页面
-            </a>
-            <a
-              v-if="selectedEnzyme.pdbUrl"
-              :href="selectedEnzyme.pdbUrl"
-              target="_blank"
-              rel="noreferrer"
-              class="text-xs font-semibold text-apple-blue hover:underline"
-            >
-              查看 PDB 页面
-            </a>
-          </div>
-
-          <div v-if="selectedEnzyme.description" class="mt-6 rounded-apple border border-apple-border bg-apple-background/35 p-4">
-            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">说明</p>
-            <p class="mt-2 text-sm leading-6 text-apple-text whitespace-pre-wrap">{{ selectedEnzyme.description }}</p>
           </div>
         </div>
 
-        <!-- Grid for Tabs/Sections -->
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
-          <div class="space-y-8">
-            <!-- Structure Section -->
-            <div class="apple-card p-6 flex flex-col">
-              <div class="flex items-center justify-between mb-6">
+        <!-- 2. 注释工具 (功能版块) -->
+        <div class="apple-card p-12 shadow-apple-2xl border-none space-y-12 bg-white dark:bg-white/5 min-h-[600px] flex flex-col">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+            <div class="flex items-center gap-6">
+              <div class="w-14 h-14 rounded-apple bg-amber-500/10 text-amber-500 flex items-center justify-center shadow-inner">
+                <Layers :size="28" />
+              </div>
+              <div>
+                <h3 class="text-xl font-bold text-apple-text">{{ selectedAnnotationToolTitle }}</h3>
+                <p class="text-xs text-apple-secondary-text mt-1 opacity-80">{{ selectedAnnotationToolDescription }}</p>
+              </div>
+            </div>
+            
+            <div class="flex flex-wrap items-center gap-4">
+              <button
+                v-if="canImportAutomaticAnnotations"
+                type="button"
+                class="apple-button-secondary !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-sm"
+                :disabled="importingAnnotations"
+                @click="handleImportAnnotations"
+              >
+                <Loader2 v-if="importingAnnotations" :size="16" class="animate-spin" />
+                <Wand2 v-else :size="16" />
+                {{ selectedAnnotationImportButtonLabel }}
+              </button>
+              <button
+                v-if="canPickAnnotationFromStructure"
+                type="button"
+                class="apple-button-secondary !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-sm"
+                @click="handlePickAnnotationFromStructure()"
+              >
+                <MousePointerClick :size="16" />
+                3D 空间选点
+              </button>
+              <div class="h-8 w-px bg-apple-border mx-2 hidden sm:block"></div>
+              <button
+                v-for="option in annotationTypeOptions"
+                :key="option.value"
+                type="button"
+                class="apple-button !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-2xl transition-transform hover:scale-105"
+                @click="openAnnotationModal(option.value)"
+              >
+                <Plus :size="16" />
+                新增{{ option.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Sequence Map & Visualization -->
+          <div class="space-y-12 flex-1">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-8">
+              <div
+                v-for="item in annotationLegend"
+                :key="item.value"
+                class="p-8 rounded-apple-xl border border-apple-border bg-black/[0.01] dark:bg-white/[0.01] flex flex-col justify-between min-h-[160px] shadow-sm transition-all hover:shadow-apple-md hover:bg-black/[0.02]"
+              >
                 <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                    <Dna :size="16" />
-                  </div>
-                  <div>
-                    <h3 class="text-sm font-bold text-apple-text">{{ selectedStructureCardTitle }}</h3>
-                    <p class="text-xs text-apple-secondary-text mt-1">{{ selectedStructureSectionDescription }}</p>
-                  </div>
+                  <span class="w-4 h-4 rounded-full shadow-sm" :style="{ backgroundColor: item.color }"></span>
+                  <p class="text-xs font-bold text-apple-text uppercase tracking-widest">{{ item.label }}</p>
                 </div>
-                <div class="flex gap-2">
-                  <button
-                    v-if="canRenderStructureViewer"
-                    @click="showFullscreenViewer = true"
-                    class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text transition-colors"
-                    title="全屏查看"
-                  >
-                    <Maximize2 :size="14" />
-                  </button>
+                <div>
+                  <p class="text-5xl font-extrabold text-apple-text tracking-tighter">{{ item.count }}</p>
+                  <p class="text-[10px] text-apple-secondary-text mt-3 font-medium opacity-60 uppercase tracking-widest">{{ item.hint }}</p>
                 </div>
               </div>
+            </div>
 
-              <div class="flex-1 min-h-[400px] relative group/viewer">
-                <template v-if="canRenderStructureViewer">
-                  <StructureViewer
-                    :pdb-id="selectedViewerStructureId"
-                    :url="selectedStructureUrl"
-                    :source-db="selectedStructureSource"
-                    :format="selectedStructureFormat"
-                    :selected-annotation="selectedAnnotation"
-                    :pick-mode="structurePickMode"
-                    @residue-picked="handleResiduePicked"
-                  />
-
-                  <div class="absolute top-4 left-4 flex flex-col gap-2">
-                    <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
-                      {{ selectedStructureStatus }}
-                    </div>
-                    <div
-                      v-if="selectedAnnotation"
-                      class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text"
-                    >
-                      聚焦注释: {{ selectedAnnotation.title }}
-                    </div>
-                  </div>
-
-                  <div class="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
-                    <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
-                      ID: {{ selectedStructureId }}
-                    </div>
-                    <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
-                      {{ selectedStructureType }}
-                    </div>
-                  </div>
-                </template>
+            <!-- Sequence Bar -->
+            <div class="p-12 rounded-apple-xl border border-apple-border bg-black/[0.02] dark:bg-white/[0.02] space-y-10">
+              <div class="flex items-center justify-between">
+                <div class="space-y-2">
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text opacity-60">全长序列映射视图</p>
+                  <p class="text-base text-apple-text font-semibold">
+                    {{ isRnaEntry ? '按 RNA 全长坐标展示注释区间' : '点击彩色区段可在 3D 视图中快速定位' }}
+                  </p>
+                </div>
+                <div class="px-6 py-2.5 rounded-full bg-apple-background dark:bg-white/5 border border-apple-border text-[10px] font-bold text-apple-blue shadow-apple-sm uppercase tracking-wider">
+                  {{ selectedEnzyme.sequenceLength }} {{ selectedSequenceUnit }}
+                </div>
+              </div>
+              
+              <div class="relative h-24 rounded-full bg-white dark:bg-black/40 border border-apple-border shadow-inner p-3 group/seq">
                 <div
-                  v-else
-                  class="h-full min-h-[400px] rounded-apple border border-dashed border-apple-border bg-apple-background/40 dark:bg-white/[0.03] p-6 flex flex-col justify-between"
+                  v-for="segment in annotationSequenceSegments"
+                  :key="segment.id"
+                  class="absolute top-3 bottom-3 rounded-full border border-white/30 transition-all cursor-pointer hover:brightness-110 active:scale-95 z-10"
+                  :class="selectedAnnotation?.id === segment.id ? 'ring-8 ring-apple-blue/20 shadow-apple-2xl z-20' : 'hover:z-30 hover:scale-y-110'"
+                  :style="{ left: segment.left, width: segment.width, backgroundColor: segment.colorHex }"
+                  :title="`${segment.title} (${segment.startResidue}-${segment.endResidue})`"
+                  @click="selectedAnnotationId = segment.id"
+                ></div>
+                <!-- 刻度线辅助 -->
+                <div class="absolute inset-0 flex justify-between px-10 pointer-events-none opacity-[0.03]">
+                  <div v-for="i in 10" :key="i" class="w-px h-full bg-black dark:bg-white"></div>
+                </div>
+              </div>
+              
+              <div class="flex justify-between text-[10px] font-bold text-apple-secondary-text px-6 opacity-40 uppercase tracking-widest">
+                <span>Start Position</span>
+                <span>{{ Math.max(1, Math.floor(selectedEnzyme.sequenceLength / 2)) }}</span>
+                <span>End Position</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Annotation Items -->
+          <div class="space-y-6 pt-6">
+            <template v-if="hasAnnotations">
+              <div v-for="annotation in annotations" :key="annotation.id" class="group">
+                <button
+                  @click="selectedAnnotationId = annotation.id"
+                  class="w-full text-left p-10 rounded-apple-xl border transition-all flex items-start justify-between gap-10"
+                  :class="selectedAnnotation?.id === annotation.id 
+                    ? 'border-apple-blue bg-apple-blue/[0.05] shadow-apple-xl' 
+                    : 'border-apple-border hover:border-apple-blue/20 bg-white dark:bg-white/5 shadow-sm'"
                 >
-                  <div class="space-y-3">
-                    <div class="inline-flex px-3 py-1.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-[10px] font-bold text-apple-secondary-text">
-                      {{ selectedStructureStatus }}
+                  <div class="flex-1 space-y-6">
+                    <div class="flex items-center gap-4 flex-wrap">
+                      <span class="inline-flex items-center gap-3 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest bg-white dark:bg-black/30 border border-apple-border text-apple-text shadow-sm">
+                        <span class="w-3.5 h-3.5 rounded-full shadow-inner" :style="{ backgroundColor: annotation.colorHex }"></span>
+                        {{ annotation.annotationType === 'DOMAIN' ? '结构域' : annotation.annotationType === 'ACTIVE_SITE' ? '活性位点' : '突变位点' }}
+                      </span>
+                      <span class="text-[10px] font-bold text-apple-blue bg-apple-blue/5 border border-apple-blue/10 px-4 py-2 rounded-full uppercase tracking-widest">
+                        Residues: {{ annotation.startResidue }}{{ annotation.endResidue !== annotation.startResidue ? `-${annotation.endResidue}` : '' }}
+                      </span>
+                      <span v-if="annotation.chainLabel" class="text-[10px] font-bold text-apple-secondary-text bg-black/5 dark:bg-white/5 px-4 py-2 rounded-full uppercase tracking-widest">
+                        Chain: {{ annotation.chainLabel }}
+                      </span>
                     </div>
                     <div>
-                      <p class="text-sm font-semibold text-apple-text">当前没有可直接展示的 RNA 三维结构</p>
-                      <p class="mt-2 text-xs leading-6 text-apple-secondary-text">{{ rnaStructureSupportHint }}</p>
-                    </div>
-                  </div>
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div class="p-4 rounded-apple border border-apple-border bg-white/70 dark:bg-black/20">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前状态</p>
-                      <p class="mt-2 text-sm font-semibold text-apple-text">{{ selectedStructureStatus }}</p>
-                    </div>
-                    <div class="p-4 rounded-apple border border-apple-border bg-white/70 dark:bg-black/20">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">后续建议</p>
-                      <p class="mt-2 text-sm font-semibold text-apple-text">
-                        {{ selectedEnzyme.sequenceLength > 400 ? '建议后续补接外部 RNA 结构来源' : '可直接送往 RNA 预测或人工上传结构' }}
+                      <h4 class="text-2xl font-bold text-apple-text">{{ annotation.title }}</h4>
+                      <p class="text-base text-apple-secondary-text mt-3 leading-relaxed opacity-80">
+                        {{ annotation.description || (annotation.annotationType === 'MUTATION' ? (annotation.mutationLabel || '未填写突变详细说明') : '该位点暂无详细功能描述') }}
                       </p>
                     </div>
                   </div>
-                  <div class="mt-4 flex items-center gap-3">
+                  
+                  <div class="flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-all translate-x-6 group-hover:translate-x-0">
                     <button
                       type="button"
-                      class="apple-button-secondary !py-2.5 !px-4 text-xs flex items-center gap-2"
-                      :disabled="!canLaunchRnaPrediction"
-                      @click="handleOpenRnaPrediction"
+                      class="w-12 h-12 rounded-full bg-white dark:bg-white/5 border border-apple-border flex items-center justify-center text-apple-secondary-text hover:bg-apple-blue hover:text-white hover:border-apple-blue transition-all shadow-sm"
+                      @click.stop="editAnnotation(annotation)"
                     >
-                      <Sparkles :size="14" />
-                      {{ selectedRnaPredictionButtonLabel }}
+                      <Pencil :size="18" />
                     </button>
-                    <p class="text-[11px] text-apple-secondary-text">
-                      {{ canLaunchRnaPrediction ? '会自动带入条目名称和 RNA 主序列。' : '当前长度超过 trRosettaRNA 支持范围，先保留为注释条目更稳。' }}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="mt-4 grid grid-cols-2 gap-3">
-                <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-                  <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Source</p>
-                  <p class="text-xs font-bold text-apple-text">{{ selectedStructureSource }}</p>
-                </div>
-                <div class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border">
-                  <p class="text-[9px] font-bold text-apple-secondary-text uppercase tracking-widest mb-1">Structure ID</p>
-                  <p class="text-xs font-bold text-apple-text truncate">{{ selectedStructureId }}</p>
-                </div>
-              </div>
-            </div>
-
-            <div class="apple-card p-6 space-y-5">
-              <div class="flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-apple bg-amber-500/10 text-amber-500 flex items-center justify-center">
-                    <Layers :size="16" />
-                  </div>
-                  <div>
-                    <h3 class="text-sm font-bold text-apple-text">{{ selectedAnnotationToolTitle }}</h3>
-                    <p class="text-xs text-apple-secondary-text">{{ selectedAnnotationToolDescription }}</p>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
-                    v-if="canImportAutomaticAnnotations"
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
-                    :disabled="importingAnnotations"
-                    @click="handleImportAnnotations"
-                  >
-                    <Loader2 v-if="importingAnnotations" :size="12" class="animate-spin" />
-                    <Wand2 v-else :size="12" />
-                    {{ selectedAnnotationImportButtonLabel }}
-                  </button>
-                  <button
-                    v-if="canPickAnnotationFromStructure"
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
-                    @click="handlePickAnnotationFromStructure()"
-                  >
-                    <MousePointerClick :size="12" />
-                    从 3D 选点
-                  </button>
-                  <button
-                    v-for="option in annotationTypeOptions"
-                    :key="option.value"
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1"
-                    @click="openAnnotationModal(option.value)"
-                  >
-                    <Plus :size="12" />
-                    {{ option.label }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div
-                  v-for="item in annotationLegend"
-                  :key="item.value"
-                  class="p-3 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5"
-                >
-                  <div class="flex items-center gap-2 mb-2">
-                    <span class="w-3 h-3 rounded-full" :style="{ backgroundColor: item.color }"></span>
-                    <p class="text-xs font-bold text-apple-text">{{ item.label }}</p>
-                  </div>
-                  <p class="text-[10px] text-apple-secondary-text">{{ item.hint }}</p>
-                  <p class="mt-2 text-lg font-bold text-apple-text">{{ item.count }}</p>
-                </div>
-              </div>
-
-              <div class="flex flex-wrap gap-3 text-[10px]">
-                <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
-                  手动注释 <span class="ml-1 font-bold text-apple-text">{{ manualAnnotationCount }}</span>
-                </div>
-                <div class="px-3 py-2 rounded-apple border border-apple-border bg-apple-background dark:bg-white/5 text-apple-secondary-text">
-                  {{ selectedImportedAnnotationLabel }} <span class="ml-1 font-bold text-apple-text">{{ annotationImportedCount }}</span>
-                </div>
-                <div
-                  v-if="structurePickMode"
-                  class="px-3 py-2 rounded-apple border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300 font-semibold"
-                >
-                  3D 选点模式开启中
-                </div>
-              </div>
-
-              <p v-if="annotationNotice" class="text-xs text-apple-blue">{{ annotationNotice }}</p>
-              <p v-else-if="annotationError && !showAnnotationModal" class="text-xs text-red-500">{{ annotationError }}</p>
-              <p v-if="isRnaEntry" class="text-xs text-apple-secondary-text">
-                RNA 条目当前可从 NCBI Nucleotide 导入基础注释，并继续基于整条序列坐标补充手动区间标注。
-              </p>
-
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
-                <div class="flex items-center justify-between gap-4 mb-3">
-                  <div>
-                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">序列注释视图</p>
-                    <p class="text-xs text-apple-secondary-text mt-1">
-                      {{ isRnaEntry ? '当前按 RNA 全长序列坐标展示注释区间，便于先做功能区整理。' : '点击下方彩色区段可同步选中对应注释，并在 3D 结构中聚焦查看。' }}
-                    </p>
-                  </div>
-                  <p class="text-xs font-semibold text-apple-text">Length: {{ selectedEnzyme.sequenceLength }} {{ selectedSequenceUnit }}</p>
-                </div>
-                <div class="relative h-12 rounded-full bg-white dark:bg-black/20 border border-apple-border overflow-hidden">
-                  <div
-                    v-for="segment in annotationSequenceSegments"
-                    :key="segment.id"
-                    class="absolute top-1/2 -translate-y-1/2 h-8 rounded-full border transition-all cursor-pointer"
-                    :class="selectedAnnotation?.id === segment.id ? 'ring-2 ring-offset-1 ring-apple-blue border-white/80' : 'border-white/40 hover:opacity-90'"
-                    :style="{ left: segment.left, width: segment.width, backgroundColor: segment.colorHex }"
-                    :title="`${segment.title} (${segment.startResidue}-${segment.endResidue})`"
-                    @click="selectedAnnotationId = segment.id"
-                  ></div>
-                </div>
-                <div class="mt-2 flex justify-between text-[10px] text-apple-secondary-text">
-                  <span>1</span>
-                  <span>{{ Math.max(1, Math.floor(selectedEnzyme.sequenceLength / 2)) }}</span>
-                  <span>{{ selectedEnzyme.sequenceLength }}</span>
-                </div>
-              </div>
-
-              <div v-if="annotationsLoading" class="py-10 flex flex-col items-center justify-center">
-                <Loader2 :size="24" class="animate-spin text-apple-blue mb-2" />
-                <p class="text-[10px] text-apple-secondary-text">读取注释中...</p>
-              </div>
-
-              <template v-else-if="hasAnnotations">
-                <div class="space-y-3">
-                  <button
-                    v-for="annotation in annotations"
-                    :key="annotation.id"
-                    @click="selectedAnnotationId = annotation.id"
-                    class="w-full text-left p-4 rounded-apple border bg-apple-background dark:bg-white/5 transition-all"
-                    :class="selectedAnnotation?.id === annotation.id ? 'border-apple-blue bg-apple-blue/5' : 'border-apple-border hover:border-apple-blue/30'"
-                  >
-                    <div class="flex items-start justify-between gap-4">
-                      <div class="space-y-2 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                          <span class="inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-white dark:bg-black/20 border border-apple-border text-apple-text">
-                            <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: annotation.colorHex }"></span>
-                            {{ annotation.annotationType === 'DOMAIN' ? '结构域' : annotation.annotationType === 'ACTIVE_SITE' ? '活性位点' : '突变位点' }}
-                          </span>
-                          <span class="text-[10px] text-apple-secondary-text uppercase tracking-widest">
-                            {{ annotation.startResidue }}{{ annotation.endResidue !== annotation.startResidue ? `-${annotation.endResidue}` : '' }}
-                          </span>
-                          <span v-if="annotation.chainLabel" class="text-[10px] text-apple-secondary-text uppercase tracking-widest">
-                            Chain {{ annotation.chainLabel }}
-                          </span>
-                          <span
-                            v-if="annotation.sourceDb"
-                            class="text-[9px] px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-apple-secondary-text"
-                          >
-                            {{ annotation.sourceDb }}
-                          </span>
-                        </div>
-                        <h4 class="text-sm font-bold text-apple-text">{{ annotation.title }}</h4>
-                        <p class="text-xs text-apple-secondary-text">
-                          {{ annotation.description || (annotation.annotationType === 'MUTATION' ? (annotation.mutationLabel || '未填写突变说明') : '未填写说明') }}
-                        </p>
-                      </div>
-                      <div class="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text"
-                          @click.stop="editAnnotation(annotation)"
-                          title="编辑注释"
-                        >
-                          <Pencil :size="14" />
-                        </button>
-                        <button
-                          type="button"
-                          class="p-2 rounded-full hover:bg-red-500/10 text-red-500 disabled:opacity-50"
-                          :disabled="deletingAnnotationId === annotation.id"
-                          @click.stop="handleDeleteAnnotation(annotation)"
-                          title="删除注释"
-                        >
-                          <Loader2 v-if="deletingAnnotationId === annotation.id" :size="14" class="animate-spin" />
-                          <Trash2 v-else :size="14" />
-                        </button>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-
-                <div v-if="selectedAnnotation" class="rounded-apple border border-apple-blue/20 bg-apple-blue/5 p-4 space-y-3">
-                  <div class="flex items-center justify-between gap-4">
-                    <div>
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前选中注释</p>
-                      <h4 class="mt-1 text-sm font-bold text-apple-text">{{ selectedAnnotation.title }}</h4>
-                    </div>
-                    <span class="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-[10px] font-bold text-apple-text">
-                      <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: selectedAnnotation.colorHex }"></span>
-                      {{ selectedAnnotationSummary }}
-                    </span>
-                  </div>
-                  <div class="flex flex-wrap gap-2 text-[10px]">
-                    <span
-                      v-if="selectedAnnotation.sourceDb"
-                      class="px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-apple-secondary-text"
+                    <button
+                      type="button"
+                      class="w-12 h-12 rounded-full bg-white dark:bg-white/5 border border-apple-border flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 transition-all shadow-sm"
+                      :disabled="deletingAnnotationId === annotation.id"
+                      @click.stop="handleDeleteAnnotation(annotation)"
                     >
-                      来源: {{ selectedAnnotation.sourceDb }}
-                    </span>
-                    <span
-                      v-if="selectedAnnotation.sourceRef"
-                      class="px-2 py-0.5 rounded-full bg-white dark:bg-black/20 border border-apple-border text-apple-secondary-text"
-                    >
-                      标识: {{ selectedAnnotation.sourceRef }}
-                    </span>
+                      <Loader2 v-if="deletingAnnotationId === annotation.id" :size="18" class="animate-spin" />
+                      <Trash2 v-else :size="18" />
+                    </button>
                   </div>
-                  <p class="text-xs leading-6 text-apple-text">
-                    {{ selectedAnnotation.description || '该注释暂无补充说明。你可以点击右上角编辑按钮补充结构功能解释、实验依据或突变备注。' }}
-                  </p>
-                </div>
-              </template>
-
-              <div v-else class="p-8 text-center border-2 border-dashed border-apple-border rounded-apple">
-                <AlertCircle :size="24" class="mx-auto text-apple-secondary-text opacity-40 mb-3" />
-                <p class="text-xs text-apple-secondary-text italic">还没有任何结构注释。先添加一个结构域、活性位点或突变位点试试看。</p>
+                </button>
               </div>
+            </template>
+            
+            <div v-else class="p-32 text-center border-2 border-dashed border-apple-border rounded-apple-xl space-y-8 bg-black/[0.01]">
+              <div class="w-24 h-24 bg-black/5 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto text-apple-secondary-text opacity-10">
+                <AlertCircle :size="48" />
+              </div>
+              <p class="text-lg text-apple-secondary-text font-medium italic">尚未建立结构注释。请通过上方工具栏开始标注功能位点。</p>
             </div>
           </div>
+        </div>
 
-          <!-- Literature Section -->
-          <div v-if="!isPredictedLibrary" class="apple-card p-6">
-            <div class="flex items-center justify-between mb-6">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center">
-                  <BookOpen :size="16" />
-                </div>
-                <h3 class="text-sm font-bold text-apple-text">关联文献</h3>
+        <!-- 3. 关联文献 (证据版块) -->
+        <div v-if="!isPredictedLibrary" class="apple-card p-12 shadow-apple-2xl border-none space-y-12 bg-white dark:bg-white/5 min-h-[600px] flex flex-col">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+            <div class="flex items-center gap-6">
+              <div class="w-14 h-14 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center shadow-inner">
+                <BookOpen :size="28" />
               </div>
-              <div class="flex items-center gap-3">
-                <button
-                  @click="openImportLiteratureModal"
-                  :disabled="!selectedId || !!importingEnzymeId"
-                  class="text-[10px] font-bold text-apple-blue hover:underline disabled:opacity-50 flex items-center gap-1"
-                >
-                  <Loader2 v-if="!!importingEnzymeId" :size="10" class="animate-spin" />
-                  <Upload v-else :size="10" />
-                  导入文献
-                </button>
-                <button
-                  @click="handleOpenMatcher"
-                  :disabled="loadingLit"
-                  class="text-[10px] font-bold text-apple-blue hover:underline disabled:opacity-50 flex items-center gap-1"
-                >
-                  <Loader2 v-if="loadingLit" :size="10" class="animate-spin" />
-                  <Sparkles v-else :size="10" />
-                  去文献匹配页
-                </button>
+              <div>
+                <h3 class="text-xl font-bold text-apple-text">关联文献证据</h3>
+                <p class="text-xs text-apple-secondary-text mt-1 opacity-80">基于多维打分模型自动关联的 PubMed 文献</p>
               </div>
             </div>
             
-            <div class="space-y-4">
-              <div v-if="loadingLit" class="py-12 flex flex-col items-center justify-center">
-                <Loader2 :size="24" class="animate-spin text-apple-blue mb-2" />
-                <p class="text-[10px] text-apple-secondary-text">搜寻证据中...</p>
-              </div>
+            <div class="flex items-center gap-4">
+              <button
+                @click="openImportLiteratureModal"
+                :disabled="!selectedId || !!importingEnzymeId"
+                class="apple-button-secondary !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-sm"
+              >
+                <Loader2 v-if="!!importingEnzymeId" :size="16" class="animate-spin" />
+                <Upload v-else :size="16" />
+                导入本地文献
+              </button>
+              <button
+                @click="handleOpenMatcher"
+                :disabled="loadingLit"
+                class="apple-button !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-2xl transition-transform hover:scale-105"
+              >
+                <Loader2 v-if="loadingLit" :size="16" class="animate-spin" />
+                <Sparkles v-else :size="16" />
+                文献匹配工作站
+              </button>
+            </div>
+          </div>
 
-              <template v-else-if="enzymeLiteratures.length">
-                <div class="space-y-3">
-                  <button
-                    v-for="lit in enzymeLiteratures"
-                    :key="lit.id"
-                    @click="selectedLiteratureId = lit.id"
-                    class="w-full text-left p-4 rounded-apple border bg-apple-background dark:bg-white/5 group transition-all"
-                    :class="selectedLiterature?.id === lit.id ? 'border-apple-blue bg-apple-blue/5' : 'border-apple-border hover:border-apple-green/30'"
-                  >
-                    <div class="flex justify-between items-start mb-2">
+          <div class="space-y-10 flex-1">
+            <div v-if="loadingLit" class="py-32 flex flex-col items-center justify-center space-y-8">
+              <Loader2 :size="48" class="animate-spin text-apple-blue" />
+              <p class="text-sm text-apple-secondary-text font-bold uppercase tracking-widest animate-pulse">正在搜寻全球文献数据库...</p>
+            </div>
+
+            <template v-else-if="enzymeLiteratures.length">
+              <!-- Top Highlighted Literature -->
+              <div v-if="selectedLiterature" class="p-12 rounded-apple-xl border border-apple-blue/20 bg-apple-blue/[0.03] space-y-10 shadow-sm">
+                <div class="flex flex-col xl:flex-row justify-between items-start gap-12">
+                  <div class="flex-1 space-y-6">
+                    <div class="flex flex-wrap items-center gap-5">
                       <span
-                        class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
-                        :class="lit.confidenceLevel === 'STRONG' ? 'bg-apple-green/10 text-apple-green' : lit.confidenceLevel === 'MANUAL' ? 'bg-purple-500/10 text-purple-500' : 'bg-apple-blue/10 text-apple-blue'"
+                        class="px-5 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-sm border border-white/20"
+                        :class="selectedLiterature.confidenceLevel === 'STRONG' ? 'bg-apple-green text-white' : selectedLiterature.confidenceLevel === 'MANUAL' ? 'bg-purple-500 text-white' : 'bg-apple-blue text-white'"
                       >
-                        {{ lit.confidenceLevel === 'MANUAL' ? 'LOCAL' : (lit.confidenceLevel || 'MATCH') }}
+                        {{ selectedLiterature.confidenceLevel === 'MANUAL' ? 'Local Upload' : (selectedLiterature.confidenceLevel || 'Evidence Match') }}
                       </span>
-                      <span class="text-[9px] text-apple-secondary-text font-bold uppercase">PMID: {{ lit.pmid }}</span>
+                      <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text bg-white dark:bg-white/5 border border-apple-border px-5 py-2 rounded-full shadow-inner">
+                        PMID: {{ selectedLiterature.pmid }}
+                      </span>
                     </div>
-                    <h4 class="text-xs font-bold text-apple-text line-clamp-2 leading-snug group-hover:text-apple-blue transition-colors">
-                      {{ lit.title }}
+                    <h4 class="text-3xl font-extrabold text-apple-text leading-tight tracking-tight">
+                      {{ selectedLiterature.title }}
                     </h4>
-                    <p class="mt-2 text-[10px] text-apple-secondary-text italic">{{ lit.journal }}, {{ lit.publishYear }}</p>
-                  </button>
+                  </div>
+                  
+                  <div class="flex gap-4 shrink-0">
+                    <button
+                      v-if="selectedLiterature.attachmentStatus === 'DOWNLOADED'"
+                      @click="handleDownloadAttachment(selectedLiterature.id)"
+                      class="apple-button !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-2xl transition-transform hover:scale-105"
+                      :disabled="downloadingAttachmentId === selectedLiterature.id"
+                    >
+                      <Loader2 v-if="downloadingAttachmentId === selectedLiterature.id" :size="16" class="animate-spin" />
+                      <Sparkles v-else :size="16" />
+                      阅读 PDF 附件
+                    </button>
+                    <a
+                      v-if="selectedLiterature.sourceDb !== 'LOCAL_UPLOAD'"
+                      :href="selectedLiterature.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${selectedLiterature.pmid}/`"
+                      target="_blank"
+                      rel="noreferrer"
+                      class="apple-button-secondary !py-4 !px-8 text-sm flex items-center gap-2 shadow-apple-sm"
+                    >
+                      <ExternalLink :size="16" />
+                      PubMed 官网
+                    </a>
+                  </div>
                 </div>
 
-                <div v-if="selectedLiterature" class="mt-2 p-5 rounded-apple border border-apple-blue/20 bg-apple-blue/5 space-y-4">
-                  <div class="flex items-start justify-between gap-4">
-                    <div class="space-y-2">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <span
-                          class="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider"
-                          :class="selectedLiterature.confidenceLevel === 'STRONG' ? 'bg-apple-green/10 text-apple-green' : selectedLiterature.confidenceLevel === 'MANUAL' ? 'bg-purple-500/10 text-purple-500' : 'bg-apple-blue/10 text-apple-blue'"
-                        >
-                          {{ selectedLiterature.confidenceLevel === 'MANUAL' ? 'LOCAL' : (selectedLiterature.confidenceLevel || 'MATCH') }}
-                        </span>
-                        <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
-                          已保存到本地数据库
-                        </span>
-                        <span
-                          class="text-[10px] font-bold uppercase tracking-widest"
-                          :class="selectedLiterature.attachmentStatus === 'DOWNLOADED' ? 'text-apple-green' : 'text-apple-secondary-text'"
-                        >
-                          {{ selectedLiterature.attachmentStatus === 'DOWNLOADED' ? '全文附件已入库' : selectedLiterature.attachmentStatus === 'NOT_OPEN_ACCESS' ? '暂无开放全文' : selectedLiterature.attachmentStatus === 'FAILED' ? '附件抓取失败' : '尚未抓取全文附件' }}
-                        </span>
-                      </div>
-                      <h4 class="text-sm font-bold text-apple-text leading-snug">
-                        {{ selectedLiterature.title }}
-                      </h4>
-                    </div>
-                    <div class="flex gap-2 shrink-0">
-                      <button
-                        v-if="selectedLiterature.attachmentStatus === 'DOWNLOADED'"
-                        @click="handleDownloadAttachment(selectedLiterature.id)"
-                        class="apple-button-secondary !py-2 !px-3 text-xs flex items-center gap-2"
-                        :disabled="downloadingAttachmentId === selectedLiterature.id"
-                      >
-                        <Loader2 v-if="downloadingAttachmentId === selectedLiterature.id" :size="12" class="animate-spin" />
-                        <Sparkles v-else :size="12" />
-                        下载本地附件
-                      </button>
-                      <a
-                        v-if="selectedLiterature.sourceDb !== 'LOCAL_UPLOAD'"
-                        :href="selectedLiterature.sourceUrl || `https://pubmed.ncbi.nlm.nih.gov/${selectedLiterature.pmid}/`"
-                        target="_blank"
-                        rel="noreferrer"
-                        class="apple-button-secondary !py-2 !px-3 text-xs flex items-center gap-2"
-                      >
-                        <ExternalLink :size="12" />
-                        官网链接
-                      </a>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div class="p-8 rounded-apple-xl bg-white dark:bg-white/5 border border-apple-border shadow-sm space-y-5">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text opacity-60">作者与发表信息</p>
+                    <div class="space-y-3">
+                      <p class="text-base font-bold text-apple-text leading-relaxed">{{ selectedLiterature.authors }}</p>
+                      <p class="text-sm text-apple-secondary-text italic">{{ selectedLiterature.journal }} · {{ selectedLiterature.publishYear }}</p>
                     </div>
                   </div>
-
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">作者</p>
-                      <p class="text-apple-text">{{ selectedLiterature.authors || '暂无作者信息' }}</p>
-                    </div>
-                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">期刊</p>
-                      <p class="text-apple-text">{{ selectedLiterature.journal || '未知期刊' }}，{{ selectedLiterature.publishYear || '未知年份' }}</p>
-                    </div>
-                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">PMID</p>
-                      <p class="text-apple-text">{{ selectedLiterature.pmid }}</p>
-                    </div>
-                    <div class="p-3 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-1">DOI</p>
-                      <p class="text-apple-text break-all">{{ selectedLiterature.doi || '暂无 DOI' }}</p>
-                    </div>
-                  </div>
-
-                  <div class="p-4 rounded-apple bg-white/80 dark:bg-black/20 border border-apple-border">
-                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-2">本地入库内容</p>
-                    <p class="text-xs leading-6 text-apple-text">
-                      {{
-                        selectedLiterature.attachmentStatus === 'DOWNLOADED'
-                          ? '该文献的开放全文附件已经抓取到本地，可通过上方“下载本地附件”按钮获取。当前下方展示的是数据库中的摘要/说明信息。'
-                          : selectedLiterature.abstractText && selectedLiterature.abstractText !== 'PubMed metadata matching...'
-                          ? selectedLiterature.abstractText
-                          : '当前已下载到本地数据库的是 PubMed 文献元数据（标题、作者、期刊、年份、PMID、DOI 和匹配关系）。如果这篇文献没有开放 PMC 全文，系统会保留元数据并标记“暂无开放全文”。'
-                      }}
+                  <div class="p-8 rounded-apple-xl bg-white dark:bg-white/5 border border-apple-border shadow-sm space-y-5">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text opacity-60">内容摘要</p>
+                    <p class="text-sm leading-relaxed text-apple-text line-clamp-5 opacity-80">
+                      {{ selectedLiterature.abstractText || '该条目暂未抓取到摘要内容。' }}
                     </p>
                   </div>
                 </div>
-              </template>
-
-              <div v-else class="p-8 text-center border-2 border-dashed border-apple-border rounded-apple">
-                <p class="text-xs text-apple-secondary-text italic">尚无已下载文献。请前往“文献匹配”扫描并下载后，再回到这里查看。</p>
               </div>
+
+              <!-- Secondary Literatures List -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6">
+                <button
+                  v-for="lit in enzymeLiteratures"
+                  :key="lit.id"
+                  @click="selectedLiteratureId = lit.id"
+                  class="text-left p-8 rounded-apple-xl border transition-all flex flex-col justify-between min-h-[200px] group shadow-sm"
+                  :class="selectedLiterature?.id === lit.id 
+                    ? 'border-apple-blue bg-apple-blue/[0.05] shadow-apple-xl' 
+                    : 'border-apple-border hover:border-apple-blue/20 bg-white dark:bg-white/5'"
+                >
+                  <div class="space-y-6">
+                    <div class="flex justify-between items-center">
+                      <span
+                        class="px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-widest"
+                        :class="lit.confidenceLevel === 'STRONG' ? 'bg-apple-green/10 text-apple-green' : lit.confidenceLevel === 'MANUAL' ? 'bg-purple-500/10 text-purple-500' : 'bg-apple-blue/10 text-apple-blue'"
+                      >
+                        {{ lit.confidenceLevel === 'MANUAL' ? 'Local' : (lit.confidenceLevel || 'Match') }}
+                      </span>
+                      <span class="text-[9px] text-apple-secondary-text font-bold uppercase tracking-widest opacity-40">PMID: {{ lit.pmid }}</span>
+                    </div>
+                    <h4 class="text-lg font-bold text-apple-text line-clamp-2 leading-tight group-hover:text-apple-blue transition-colors">
+                      {{ lit.title }}
+                    </h4>
+                  </div>
+                  <p class="text-[10px] text-apple-secondary-text italic font-medium opacity-60 truncate pt-6 uppercase tracking-wider">{{ lit.journal }}, {{ lit.publishYear }}</p>
+                </button>
+              </div>
+            </template>
+
+            <div v-else class="p-32 text-center border-2 border-dashed border-apple-border rounded-apple-xl space-y-8 bg-black/[0.01]">
+              <div class="w-24 h-24 bg-black/5 dark:bg-white/5 rounded-full flex items-center justify-center mx-auto text-apple-secondary-text opacity-10">
+                <BookOpen :size="48" />
+              </div>
+              <p class="text-lg text-apple-secondary-text font-medium italic">尚未关联文献证据。请前往文献匹配工作站获取最新研究成果。</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 预测入库资产说明 (替代文献版块) -->
+        <div v-else class="apple-card p-16 shadow-apple-2xl border-none space-y-12 bg-white dark:bg-white/5 min-h-[600px] flex flex-col justify-center">
+          <div class="flex items-center gap-6">
+            <div class="w-14 h-14 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center shadow-inner">
+              <Sparkles :size="28" />
+            </div>
+            <div>
+              <h3 class="text-2xl font-bold text-apple-text">预测入库资产说明</h3>
+              <p class="text-sm text-apple-secondary-text opacity-80">本地确认入库的 AI 预测结构资产，独立于公共数据库管理</p>
             </div>
           </div>
 
-          <div v-else class="apple-card p-6">
-            <div class="flex items-center gap-3 mb-6">
-              <div class="w-8 h-8 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center">
-                <Sparkles :size="16" />
-              </div>
-              <h3 class="text-sm font-bold text-apple-text">预测入库说明</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+            <div class="p-12 rounded-apple-xl border border-apple-border bg-black/[0.02] dark:bg-white/[0.02] space-y-6 shadow-sm">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-blue opacity-80">资产属性 (Asset Attributes)</p>
+              <p class="text-xl font-bold text-apple-text">预测确认件 (Verified Prediction)</p>
+              <p class="text-base leading-relaxed text-apple-secondary-text opacity-80">
+                本仓库仅存储经过人工确认命名的预测结果。预测生成的 PDB 文件已完整同步至本地存储，支持持久化分析与注释。
+              </p>
             </div>
 
-            <div class="space-y-4">
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前来源</p>
-                <p class="mt-2 text-sm font-semibold text-apple-text">本地/云端预测结果</p>
-                <p class="mt-2 text-xs leading-6 text-apple-secondary-text">
-                  这个页面只保留已经由你确认命名并正式入库的预测结构。它们和 accession 导入条目分仓管理，避免后续检索、展示和结构判断时互相干扰。
-                </p>
-              </div>
-
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">建议下一步</p>
-                <div class="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-4 text-xs"
-                    @click="router.push('/prediction/minifold')"
-                  >
-                    去 MiniFold
-                  </button>
-                  <button
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-4 text-xs"
-                    @click="router.push('/prediction/esmfold')"
-                  >
-                    去 ESMFold
-                  </button>
-                  <button
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-4 text-xs"
-                    @click="router.push('/prediction/trrosettarna')"
-                  >
-                    去 trRosettaRNA
-                  </button>
-                  <button
-                    type="button"
-                    class="apple-button-secondary !py-2 !px-4 text-xs"
-                    @click="router.push('/library/imported')"
-                  >
-                    查看导入酶库
-                  </button>
-                </div>
+            <div class="p-12 rounded-apple-xl border border-apple-border bg-black/[0.02] dark:bg-white/[0.02] space-y-10 shadow-sm">
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-blue opacity-80">工作流快捷入口 (Quick Access)</p>
+              <div class="grid grid-cols-2 gap-6">
+                <button @click="router.push('/prediction/minifold')" class="apple-button-secondary !py-4 !text-[10px] font-bold uppercase tracking-widest shadow-sm hover:bg-apple-blue hover:text-white transition-colors">MiniFold</button>
+                <button @click="router.push('/prediction/esmfold')" class="apple-button-secondary !py-4 !text-[10px] font-bold uppercase tracking-widest shadow-sm hover:bg-apple-blue hover:text-white transition-colors">ESMFold</button>
+                <button @click="router.push('/prediction/trrosettarna')" class="apple-button-secondary !py-4 !text-[10px] font-bold uppercase tracking-widest shadow-sm hover:bg-apple-blue hover:text-white transition-colors">trRosettaRNA</button>
+                <button @click="router.push('/library/imported')" class="apple-button-secondary !py-4 !text-[10px] font-bold uppercase tracking-widest shadow-sm hover:bg-apple-blue hover:text-white transition-colors">导入库</button>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else class="flex flex-col items-center justify-center h-[calc(100vh-280px)] apple-card">
-        <div class="w-20 h-20 bg-apple-light-gray dark:bg-white/5 rounded-full flex items-center justify-center mb-6 text-apple-secondary-text opacity-20">
-          <FlaskConical :size="40" />
+        <!-- 5. 补充信息 (功能说明) -->
+        <div v-if="selectedEnzyme.description" class="apple-card p-12 shadow-apple-2xl border-none bg-black/[0.01] dark:bg-white/[0.01]">
+          <div class="flex items-center gap-4 mb-8">
+            <Info :size="20" class="text-apple-secondary-text opacity-40" />
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text opacity-60">功能备注与说明</p>
+          </div>
+          <p class="text-lg leading-relaxed text-apple-text whitespace-pre-wrap opacity-90 italic">{{ selectedEnzyme.description }}</p>
         </div>
-        <h3 class="text-lg font-bold text-apple-text mb-2">{{ emptyTitle }}</h3>
-        <p class="text-sm text-apple-secondary-text max-w-xs text-center">{{ emptyDescription }}</p>
       </div>
-    </div>
+    </template>
 
     <!-- Fullscreen 3D Viewer Modal -->
     <transition name="fade">
@@ -1510,7 +1261,7 @@ onUnmounted(() => {
             @click="showFullscreenViewer = false"
             class="w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <X :size="20" />
           </button>
         </div>
         <div class="flex-1 p-8">
@@ -1528,44 +1279,47 @@ onUnmounted(() => {
       </div>
     </transition>
 
+    <!-- Import Literature Modal -->
     <transition name="fade">
       <div
         v-if="showImportLiteratureModal"
         class="fixed inset-0 z-[110] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
         @click.self="closeImportLiteratureModal"
       >
-        <div class="w-full max-w-xl apple-card p-6 space-y-5">
+        <div class="w-full max-w-xl apple-card p-8 space-y-6">
           <div class="flex items-start justify-between gap-4">
             <div class="space-y-1">
-              <h3 class="text-lg font-bold text-apple-text">导入本地文献</h3>
-              <p class="text-sm text-apple-secondary-text">
+              <h3 class="text-xl font-bold text-apple-text">导入本地文献</h3>
+              <p class="text-sm text-apple-secondary-text leading-relaxed">
                 为当前酶条目添加本地文献附件。系统会把文件复制到平台存储目录，并在关联文献里显示。
               </p>
             </div>
             <button
               @click="closeImportLiteratureModal"
               :disabled="!!importingEnzymeId"
-              class="w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text flex items-center justify-center disabled:opacity-50"
+              class="w-10 h-10 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text flex items-center justify-center disabled:opacity-50"
             >
-              <X :size="16" />
+              <X :size="18" />
             </button>
           </div>
 
-          <div class="space-y-2">
-            <label class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">选择文件</label>
-            <input
-              type="file"
-              class="apple-input w-full"
-              @change="handleImportFileChange"
-              :disabled="!!importingEnzymeId"
-            />
-            <p class="text-xs text-apple-secondary-text">
-              支持直接从本机选择文件。导入后文件会复制到平台本地存储目录，不依赖原始文件继续存在。
-            </p>
-            <p v-if="importLiteratureFile" class="text-xs text-apple-text">
-              已选择：{{ importLiteratureFile.name }}
-            </p>
-            <p v-if="importLiteratureError" class="text-xs text-red-500">
+          <div class="space-y-4">
+            <div class="p-8 border-2 border-dashed border-apple-border rounded-apple bg-black/[0.01] flex flex-col items-center justify-center space-y-4">
+              <Upload :size="32" class="text-apple-secondary-text opacity-40" />
+              <input
+                type="file"
+                class="hidden"
+                id="file-upload"
+                @change="handleImportFileChange"
+                :disabled="!!importingEnzymeId"
+              />
+              <label for="file-upload" class="apple-button-secondary !py-2 !px-4 text-xs cursor-pointer">选择文件</label>
+              <p v-if="importLiteratureFile" class="text-sm font-bold text-apple-blue">
+                已选择：{{ importLiteratureFile.name }}
+              </p>
+              <p v-else class="text-xs text-apple-secondary-text italic">未选择任何文件</p>
+            </div>
+            <p v-if="importLiteratureError" class="text-xs text-red-500 font-bold text-center">
               {{ importLiteratureError }}
             </p>
           </div>
@@ -1574,138 +1328,146 @@ onUnmounted(() => {
             <button
               @click="closeImportLiteratureModal"
               :disabled="!!importingEnzymeId"
-              class="apple-button-secondary !py-2 !px-4 text-xs disabled:opacity-50"
+              class="apple-button-secondary !py-2.5 !px-6 text-xs disabled:opacity-50"
             >
               取消
             </button>
             <button
               @click="handleImportLiterature"
-              :disabled="!!importingEnzymeId"
-              class="apple-button !py-2 !px-4 text-xs flex items-center gap-2 disabled:opacity-50"
+              :disabled="!!importingEnzymeId || !importLiteratureFile"
+              class="apple-button !py-2.5 !px-6 text-xs flex items-center gap-2 disabled:opacity-50 shadow-apple-md"
             >
               <Loader2 v-if="!!importingEnzymeId" :size="14" class="animate-spin" />
-              <Upload v-else :size="14" />
-              导入到当前酶
+              <Check v-else :size="14" />
+              确认导入
             </button>
           </div>
         </div>
       </div>
     </transition>
 
+    <!-- Annotation Modal -->
     <transition name="fade">
       <div
         v-if="showAnnotationModal"
         class="fixed inset-0 z-[115] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
         @click.self="closeAnnotationModal"
       >
-        <div class="w-full max-w-2xl apple-card p-6 space-y-5">
+        <div class="w-full max-w-2xl apple-card p-8 space-y-6 shadow-apple-2xl">
           <div class="flex items-start justify-between gap-4">
             <div class="space-y-1">
-              <h3 class="text-lg font-bold text-apple-text">{{ editingAnnotationId ? '编辑结构注释' : '新增结构注释' }}</h3>
-              <p class="text-sm text-apple-secondary-text">
+              <h3 class="text-xl font-bold text-apple-text">{{ editingAnnotationId ? '编辑结构注释' : '新增结构注释' }}</h3>
+              <p class="text-sm text-apple-secondary-text leading-relaxed">
                 为当前酶条目记录结构域、活性位点或突变位点。保存后可在 3D 结构中直接聚焦查看。
-              </p>
-              <p v-if="structurePickMode" class="text-xs text-amber-600 dark:text-amber-300">
-                当前已开启 3D 选点模式。请点击左侧结构中的残基，系统会自动把位点和链号带回表单。
               </p>
             </div>
             <button
               @click="closeAnnotationModal"
               :disabled="annotationSaving"
-              class="w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text flex items-center justify-center disabled:opacity-50"
+              class="w-10 h-10 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text flex items-center justify-center disabled:opacity-50"
             >
-              <X :size="16" />
+              <X :size="18" />
             </button>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label class="space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">注释类型</span>
+          <div v-if="structurePickMode" class="p-4 rounded-apple bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center gap-3">
+            <MousePointerClick :size="18" class="text-amber-600" />
+            <p class="text-xs text-amber-700 dark:text-amber-300 font-bold uppercase tracking-wider">
+              3D 选点模式激活：请点击 3D 结构中的残基，位点信息将自动回填
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">注释类型</span>
               <div class="flex items-center gap-2">
-                <select v-model="annotationForm.annotationType" class="apple-input w-full">
+                <select v-model="annotationForm.annotationType" class="apple-input w-full text-sm">
                   <option v-for="option in annotationTypeOptions" :key="option.value" :value="option.value">
                     {{ option.label }}
                   </option>
                 </select>
                 <button
+                  v-if="canPickAnnotationFromStructure"
                   type="button"
-                  class="apple-button-secondary !py-2 !px-3 text-[10px] flex items-center gap-1 shrink-0"
+                  class="apple-button-secondary !py-2.5 !px-3 text-[10px] flex items-center gap-1 shrink-0"
                   @click="handlePickAnnotationFromStructure(annotationForm.annotationType)"
                 >
                   <MousePointerClick :size="12" />
-                  选点
+                  3D 选点
                 </button>
               </div>
-            </label>
+            </div>
 
-            <label class="space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">注释标题</span>
-              <input v-model="annotationForm.title" type="text" class="apple-input w-full" placeholder="例如：催化核心区域 / Ser128 突变位点" />
-            </label>
+            <div class="space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">注释标题</span>
+              <input v-model="annotationForm.title" type="text" class="apple-input w-full text-sm" placeholder="例如：催化核心区域 / Ser128" />
+            </div>
 
-            <label class="space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">起始残基</span>
-              <input v-model.number="annotationForm.startResidue" type="number" min="1" class="apple-input w-full" placeholder="例如 128" />
-            </label>
+            <div class="space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">起始残基</span>
+              <input v-model.number="annotationForm.startResidue" type="number" min="1" class="apple-input w-full text-sm" placeholder="例如 128" />
+            </div>
 
-            <label class="space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">
-                {{ annotationForm.annotationType === 'MUTATION' ? '结束残基（自动等于起始位点）' : '结束残基' }}
+            <div class="space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">
+                {{ annotationForm.annotationType === 'MUTATION' ? '结束残基 (锁定)' : '结束残基' }}
               </span>
               <input
                 v-model.number="annotationForm.endResidue"
                 type="number"
                 min="1"
-                class="apple-input w-full"
+                class="apple-input w-full text-sm"
                 :disabled="annotationForm.annotationType === 'MUTATION'"
-                :placeholder="annotationForm.annotationType === 'MUTATION' ? '突变位点固定为单残基' : '例如 196'"
+                :placeholder="annotationForm.annotationType === 'MUTATION' ? '单残基位点' : '例如 196'"
               />
-            </label>
+            </div>
 
-            <label class="space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">链标识</span>
-              <input v-model="annotationForm.chainLabel" type="text" class="apple-input w-full" placeholder="可选，例如 A" />
-            </label>
+            <div class="space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">链标识</span>
+              <input v-model="annotationForm.chainLabel" type="text" class="apple-input w-full text-sm" placeholder="可选，例如 A" />
+            </div>
 
-            <label class="space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">颜色</span>
+            <div class="space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">标记颜色</span>
               <div class="flex items-center gap-3">
-                <input v-model="annotationForm.colorHex" type="color" class="h-10 w-14 rounded border border-apple-border bg-transparent" />
-                <input v-model="annotationForm.colorHex" type="text" class="apple-input flex-1" placeholder="#3B82F6" />
+                <input v-model="annotationForm.colorHex" type="color" class="h-10 w-14 rounded border border-apple-border bg-transparent cursor-pointer shadow-sm" />
+                <input v-model="annotationForm.colorHex" type="text" class="apple-input flex-1 text-sm font-mono" placeholder="#3B82F6" />
               </div>
-            </label>
+            </div>
 
-            <label v-if="annotationForm.annotationType === 'MUTATION'" class="md:col-span-2 space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">突变说明</span>
-              <input v-model="annotationForm.mutationLabel" type="text" class="apple-input w-full" placeholder="例如：S128A / G45D" />
-            </label>
+            <div v-if="annotationForm.annotationType === 'MUTATION'" class="md:col-span-2 space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">突变说明</span>
+              <input v-model="annotationForm.mutationLabel" type="text" class="apple-input w-full text-sm" placeholder="例如：S128A / G45D" />
+            </div>
 
-            <label class="md:col-span-2 space-y-2">
-              <span class="text-xs font-bold uppercase tracking-widest text-apple-secondary-text">备注说明</span>
+            <div class="md:col-span-2 space-y-2">
+              <span class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text ml-1">备注说明</span>
               <textarea
                 v-model="annotationForm.description"
                 rows="4"
-                class="apple-input w-full resize-none"
-                placeholder="可填写功能解释、实验依据、保守性分析结论等"
+                class="apple-input w-full resize-none text-sm leading-relaxed"
+                placeholder="填写功能解释、实验依据、保守性分析结论等"
               ></textarea>
-            </label>
+            </div>
           </div>
 
-          <p v-if="annotationNotice" class="text-xs text-apple-blue">{{ annotationNotice }}</p>
-          <p v-if="annotationError" class="text-xs text-red-500">{{ annotationError }}</p>
+          <div class="space-y-2">
+            <p v-if="annotationNotice" class="text-xs text-apple-blue font-bold text-center animate-pulse">{{ annotationNotice }}</p>
+            <p v-if="annotationError" class="text-xs text-red-500 font-bold text-center">{{ annotationError }}</p>
+          </div>
 
-          <div class="flex justify-end gap-3">
+          <div class="flex justify-end gap-3 pt-2">
             <button
               @click="closeAnnotationModal"
               :disabled="annotationSaving"
-              class="apple-button-secondary !py-2 !px-4 text-xs disabled:opacity-50"
+              class="apple-button-secondary !py-3 !px-8 text-xs disabled:opacity-50"
             >
               取消
             </button>
             <button
               @click="handleSaveAnnotation"
               :disabled="annotationSaving"
-              class="apple-button !py-2 !px-4 text-xs flex items-center gap-2 disabled:opacity-50"
+              class="apple-button !py-3 !px-8 text-xs flex items-center gap-2 disabled:opacity-50 shadow-apple-md"
             >
               <Loader2 v-if="annotationSaving" :size="14" class="animate-spin" />
               <Check v-else :size="14" />
@@ -1717,3 +1479,20 @@ onUnmounted(() => {
     </transition>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.apple-input:focus {
+  @apply ring-4 ring-apple-blue/10;
+}
+</style>

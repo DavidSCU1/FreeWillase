@@ -40,12 +40,10 @@ const lastLogUpdatedAt = ref<number | null>(null)
 const consoleViewport = ref<HTMLElement | null>(null)
 const autoScrollLogs = ref(true)
 const nowTick = ref(Date.now())
-const isTaskPanelCollapsed = ref(false)
 
 let resultInterval: ReturnType<typeof setInterval> | null = null
 let logInterval: ReturnType<typeof setInterval> | null = null
 let clockInterval: ReturnType<typeof setInterval> | null = null
-const TASK_PANEL_STORAGE_KEY = 'minifoldTaskPanelCollapsed'
 
 const taskStageBlueprint = [
   { label: '提交任务', hint: '校验输入并向后端申请任务号' },
@@ -102,23 +100,23 @@ const normalizedSequenceLength = computed(() => {
 const envLength = computed(() => store.envText.trim().length)
 const summaryItems = computed(() => [
   {
-    label: '序列',
+    label: '序列长度',
     value: normalizedSequenceLength.value ? `${normalizedSequenceLength.value} ${sequenceUnitLabel.value}` : '未填写',
   },
   {
-    label: '环境描述',
-    value: envLength.value ? `已填写 ${envLength.value} 字` : '选填',
+    label: '环境约束',
+    value: envLength.value ? `已提供 (${envLength.value} 字)` : '未提供',
   },
   {
-    label: '链数',
+    label: '预测链数',
     value: targetChainLabel.value,
   },
   {
-    label: '推理模式',
+    label: '计算后端',
     value: inferenceModeLabel.value,
   },
   {
-    label: 'Python 环境',
+    label: '执行环境',
     value: condaEnvLabel.value,
   },
 ])
@@ -183,16 +181,16 @@ const currentStageLabel = computed(() => {
   return `${Math.min(Math.max(activeStageIndex.value + 1, 1), taskStageBlueprint.length)} / ${taskStageBlueprint.length}`
 })
 const runtimeHeadline = computed(() => {
-  if (store.status === 'success') return '结构已完成，可直接查看结果'
-  if (store.status === 'error') return store.engineTaskId ? '任务中途停止，请看下方日志' : '请求尚未进入任务队列'
-  if (store.status === 'running') return '运行时正在连续输出，日志会自动刷新'
-  return '点击开始后，这里会展示完整任务过程'
+  if (store.status === 'success') return '推理完成'
+  if (store.status === 'error') return store.engineTaskId ? '任务中断' : '未入队'
+  if (store.status === 'running') return '正在同步日志'
+  return '等待启动'
 })
 const runtimeSignalLabel = computed(() => {
-  if (store.status === 'success') return '结构文件已稳定写出，可直接查看或入库'
-  if (store.status === 'error') return store.engineTaskId ? '运行信号已中断，请结合日志定位问题' : '任务还未进入运行阶段'
-  if (store.status === 'running') return '推理引擎持续输出中，当前波形为实时采样态'
-  return '等待任务启动后开始采样'
+  if (store.status === 'success') return '结构已稳定输出'
+  if (store.status === 'error') return store.engineTaskId ? '信号中断' : '待命'
+  if (store.status === 'running') return '引擎持续输出中'
+  return '待机'
 })
 const runtimeSignalTone = computed(() => {
   if (store.status === 'success') return 'Result Locked'
@@ -224,55 +222,34 @@ const logTimestampLabel = computed(() => {
   const date = new Date(lastLogUpdatedAt.value)
   return date.toLocaleTimeString('zh-CN', { hour12: false })
 })
-const recoveredTaskHint = computed(() => {
-  if (!store.engineTaskId) return ''
-  if (store.status === 'running') return '页面已恢复上次未完成任务，正在继续监控实时输出。'
-  if (store.status === 'success') return '页面已恢复上次任务结果，你可以继续查看结构或下载 PDB。'
-  if (store.status === 'error') return '页面已恢复上次任务状态，可直接查看失败信息与日志。'
-  return ''
-})
-const taskList = computed(() => store.taskHistory.map(task => ({
-  ...task,
-  badgeClass: task.status === 'running'
-    ? 'bg-apple-blue/10 text-apple-blue'
-    : task.status === 'success'
-      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
-      : 'bg-red-500/10 text-red-500',
-  badgeLabel: task.status === 'running' ? 'Running' : task.status === 'success' ? 'Success' : 'Error',
-  isActive: task.taskId === store.engineTaskId,
-  updatedLabel: new Date(task.updatedAt).toLocaleTimeString('zh-CN', { hour12: false }),
-})))
-const activeTaskCard = computed(() => taskList.value.find(task => task.isActive) || taskList.value[0] || null)
 const statusMeta = computed(() => {
   if (store.status === 'success') {
     return {
-      title: '结果已返回',
-      description: '结构已经生成完成，可以直接查看三维结果或下载 PDB。',
+      title: '预测成功',
+      description: '结构已生成。',
       chip: 'Success',
       chipClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
     }
   }
   if (store.status === 'running') {
     return {
-      title: 'MiniFold 正在运行',
-      description: '任务已提交，页面会持续轮询结果并在完成后自动刷新视图。',
+      title: '运行中',
+      description: '正在推理。',
       chip: 'Running',
       chipClass: 'bg-apple-blue/10 text-apple-blue',
     }
   }
   if (store.status === 'error') {
     return {
-      title: store.engineTaskId ? '任务执行失败' : '提交未成功',
-      description: store.error || (store.engineTaskId
-        ? '请检查输入格式、环境约束或本机后端状态后重试。'
-        : '这次请求还没拿到任务 ID，说明失败发生在提交阶段。请查看页面下方错误提示或浏览器控制台日志。'),
+      title: '执行失败',
+      description: store.error || '任务中断。',
       chip: 'Error',
       chipClass: 'bg-red-500/10 text-red-500',
     }
   }
   return {
-    title: '准备开始推理',
-    description: '按顺序填写左侧配置，确认摘要无误后即可启动 MiniFold。',
+    title: '准备推理',
+    description: '确认配置后启动。',
     chip: 'Idle',
     chipClass: 'bg-apple-background text-apple-secondary-text',
   }
@@ -347,11 +324,6 @@ GGGCUAUUAGCUCAGUUGGUUAGAGCGCACCCCUGAUAAGGGUGAGGUCGCUGAUUCGAAUUCAGCAUAGCCCA`;
       ? '线粒体相关酶，倾向形成稳定紧凑构象，尽量避免疏水核心过度暴露。'
       : '包含 Mg2+，倾向于形成经典的 A-form 茎区和稳定的假结或三通结构。';
   }
-}
-
-function toggleTaskPanel() {
-  isTaskPanelCollapsed.value = !isTaskPanelCollapsed.value
-  localStorage.setItem(TASK_PANEL_STORAGE_KEY, isTaskPanelCollapsed.value ? '1' : '0')
 }
 
 function stopPolling() {
@@ -467,24 +439,6 @@ function selectInferenceMode(mode: string) {
   store.backend = mode as MiniFoldBackend
 }
 
-async function activateTask(taskId: string) {
-  const switched = store.activateTask(taskId)
-  if (!switched) return
-
-  runtimeLog.value = ''
-  lastLogUpdatedAt.value = null
-  autoScrollLogs.value = true
-
-  if (store.status === 'running') {
-    ensureClock()
-    startPolling()
-  } else {
-    stopPolling()
-    stopClock()
-    await refreshLogs()
-  }
-}
-
 async function handleSaveToLibrary() {
   if (!store.lastStructureText) return
   if (!libraryEntryName.value.trim()) {
@@ -542,7 +496,6 @@ watch(() => store.status, status => {
 })
 
 onMounted(() => {
-  isTaskPanelCollapsed.value = localStorage.getItem(TASK_PANEL_STORAGE_KEY) === '1'
   if (store.engineTaskId && store.status === 'running') {
     ensureClock()
     startPolling()
@@ -559,695 +512,232 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="space-y-8 pb-20">
-    <div class="space-y-4">
-      <button
-        type="button"
-        class="inline-flex items-center gap-2 text-xs font-bold text-apple-secondary-text hover:text-apple-text transition-colors"
-        @click="router.push('/prediction')"
-      >
-        <ArrowLeft :size="14" />
-        返回预测中心
-      </button>
-
-      <div class="apple-card p-6 md:p-7 bg-gradient-to-br from-apple-blue/8 via-transparent to-purple-500/8 border-apple-blue/10">
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-          <div class="space-y-3">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
-                <Sparkles :size="18" />
-              </div>
-              <div>
-                <h1 class="text-3xl font-bold tracking-tight text-apple-text">MiniFold 工作台</h1>
-                <p class="text-sm text-apple-secondary-text">把预测流程收成三步：准备输入、确认执行、查看结构结果。</p>
-              </div>
-            </div>
-
-            <div class="flex flex-wrap gap-2">
-              <div class="flex items-center bg-apple-background/50 p-1 rounded-full border border-apple-border mr-2">
-                <button
-                  class="px-4 py-1 text-xs font-bold rounded-full transition-all duration-200"
-                  :class="store.moleculeType === 'protein' ? 'bg-apple-blue text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
-                  @click="store.moleculeType = 'protein'"
-                >
-                  蛋白质 (Protein)
-                </button>
-                <button
-                  class="px-4 py-1 text-xs font-bold rounded-full transition-all duration-200"
-                  :class="store.moleculeType === 'RNA' ? 'bg-emerald-500 text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
-                  @click="store.moleculeType = 'RNA'"
-                >
-                  核糖核酸 (RNA)
-                </button>
-              </div>
-
-              <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold" :class="statusMeta.chipClass">
-                <Activity v-if="store.status === 'running'" class="animate-pulse" :size="12" />
-                <CheckCircle2 v-else-if="store.status === 'success'" :size="12" />
-                <AlertCircle v-else-if="store.status === 'error'" :size="12" />
-                <Microscope v-else :size="12" />
-                {{ statusMeta.title }}
-              </span>
-              <span class="inline-flex items-center rounded-full bg-apple-background px-3 py-1 text-[11px] font-bold text-apple-secondary-text">
-                任务 ID: {{ selectedStructureId }}
-              </span>
-            </div>
-
-            <p class="max-w-2xl text-sm leading-relaxed text-apple-secondary-text">
-              {{ statusMeta.description }}
-            </p>
-            <p v-if="recoveredTaskHint" class="text-[11px] font-bold text-apple-blue">
-              {{ recoveredTaskHint }}
-            </p>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3 lg:min-w-[320px]">
-            <div
-              v-for="item in summaryItems"
-              :key="item.label"
-              class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3"
-            >
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">{{ item.label }}</p>
-              <p class="mt-1 text-sm font-semibold text-apple-text">{{ item.value }}</p>
-            </div>
-          </div>
+  <div class="space-y-6 pb-20">
+    <!-- Top Action Bar -->
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-white dark:bg-white/5 rounded-2xl p-4 shadow-sm">
+      <div class="flex items-center gap-4">
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 text-xs font-bold text-apple-secondary-text hover:text-apple-text transition-colors"
+          @click="router.push('/prediction')"
+        >
+          <ArrowLeft :size="14" />
+          返回
+        </button>
+        <div class="h-4 w-px bg-apple-border"></div>
+        <div class="flex items-center bg-apple-background/50 p-1 rounded-full border border-apple-border">
+          <button
+            class="px-4 py-1 text-[10px] font-bold rounded-full transition-all duration-200"
+            :class="store.moleculeType === 'protein' ? 'bg-apple-blue text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
+            @click="store.moleculeType = 'protein'"
+          >
+            Protein
+          </button>
+          <button
+            class="px-4 py-1 text-[10px] font-bold rounded-full transition-all duration-200"
+            :class="store.moleculeType === 'RNA' ? 'bg-emerald-500 text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
+            @click="store.moleculeType = 'RNA'"
+          >
+            RNA
+          </button>
         </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold" :class="statusMeta.chipClass">
+          <Activity v-if="store.status === 'running'" class="animate-pulse" :size="12" />
+          <CheckCircle2 v-else-if="store.status === 'success'" :size="12" />
+          <AlertCircle v-else-if="store.status === 'error'" :size="12" />
+          <Microscope v-else :size="12" />
+          {{ statusMeta.title }}
+        </span>
+        <span class="text-[10px] font-bold text-apple-secondary-text tabular-nums">
+          ID: {{ selectedStructureId }}
+        </span>
       </div>
     </div>
 
-    <div class="flex flex-col gap-8 xl:flex-row xl:items-start">
-      <aside
-        class="shrink-0 transition-all duration-300 xl:sticky xl:top-6"
-        :class="isTaskPanelCollapsed ? 'xl:w-[92px]' : 'xl:w-[320px]'"
-      >
-        <div class="apple-card overflow-hidden">
-          <div class="flex items-center justify-between gap-3 border-b border-apple-border px-4 py-4">
-            <div class="flex items-center gap-3" :class="isTaskPanelCollapsed ? 'justify-center w-full' : ''">
-              <div class="flex h-9 w-9 items-center justify-center rounded-apple bg-apple-blue/10 text-apple-blue">
-                <ListTree :size="16" />
+    <!-- Main Workspace -->
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <!-- Left: Execution Configuration -->
+      <div class="space-y-6">
+        <div class="bg-white dark:bg-white/5 rounded-3xl p-8 space-y-8 shadow-sm">
+          <!-- Header Section -->
+          <div class="space-y-2">
+            <h2 class="text-lg font-bold text-apple-text flex items-center gap-2">
+              <Dna class="text-apple-blue" :size="20" />
+              任务配置
+            </h2>
+            <p class="text-xs text-apple-secondary-text">定义序列信息、环境约束及计算引擎参数以启动预测任务。</p>
+          </div>
+
+          <!-- Sequence Input -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">序列输入 ({{ sequenceKindLabel }})</label>
+              <div class="flex items-center gap-3">
+                <button type="button" class="text-[10px] font-bold text-apple-blue hover:underline" @click="fillExample">载入示例</button>
+                <button type="button" class="text-[10px] font-bold text-apple-secondary-text hover:underline" @click="store.sequence = ''">清空</button>
               </div>
-              <div v-if="!isTaskPanelCollapsed" class="space-y-1">
-                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">任务侧栏</p>
-                <h3 class="text-sm font-bold text-apple-text">最近 MiniFold 任务</h3>
+            </div>
+            <textarea
+              v-model="store.sequence"
+              class="apple-input min-h-[220px] text-xs font-mono p-4 bg-apple-background/30"
+              placeholder="粘贴 FASTA 或纯序列数据..."
+            />
+          </div>
+
+          <!-- Environment & Constraints -->
+          <div class="grid gap-6 sm:grid-cols-2">
+            <div class="space-y-3">
+              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">环境/功能描述</label>
+              <textarea
+                v-model="store.envText"
+                class="apple-input min-h-[120px] text-xs p-4"
+                placeholder="描述酶的作用环境或目标构象特征..."
+              />
+            </div>
+            <div class="space-y-6">
+              <div v-if="store.moleculeType === 'protein'" class="space-y-3">
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">目标链数</label>
+                <select :value="store.targetChains ?? ''" class="apple-input text-xs" @change="updateTargetChains">
+                  <option v-for="option in targetChainOptions" :key="option.value || 'auto'" :value="option.value">{{ option.label }}</option>
+                </select>
+              </div>
+              <div class="space-y-3">
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">计算后端</label>
+                <select :value="selectedInferenceMode" class="apple-input text-xs" @change="e => selectInferenceMode((e.target as HTMLSelectElement).value)">
+                  <option v-for="item in backendOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Engine Path -->
+          <div class="space-y-3">
+            <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">推理引擎路径 (Python/Conda)</label>
+            <input v-model="store.condaEnvName" type="text" class="apple-input text-xs" placeholder="自动发现 或 指定具体路径..." />
+          </div>
+          
+          <div class="flex items-center justify-between pt-6 border-t border-apple-border">
+            <div class="flex items-center gap-4">
+              <div v-for="item in readinessItems" :key="item.label" class="flex items-center gap-1.5">
+                <CheckCircle2 v-if="item.done" class="text-emerald-500" :size="12" />
+                <div v-else class="w-2 h-2 rounded-full bg-apple-background border border-apple-border"></div>
+                <span class="text-[10px] font-bold text-apple-secondary-text">{{ item.label }}</span>
               </div>
             </div>
             <button
               type="button"
-              class="inline-flex rounded-full border border-apple-border p-2 text-apple-secondary-text transition-colors hover:bg-apple-background hover:text-apple-text"
-              :title="isTaskPanelCollapsed ? '展开任务侧栏' : '收起任务侧栏'"
-              @click="toggleTaskPanel"
+              class="apple-button-primary px-8 py-2.5 flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-apple-blue/20"
+              :disabled="store.isSubmitting || !store.sequence.trim()"
+              @click="handleSubmit"
             >
-              <ChevronRight v-if="isTaskPanelCollapsed" :size="16" />
-              <ChevronLeft v-else :size="16" />
+              <Loader2 v-if="store.isSubmitting" class="animate-spin" :size="16" />
+              <Play v-else :size="16" />
+              <span class="text-sm font-bold">启动推理</span>
             </button>
           </div>
+        </div>
+      </div>
 
-          <div v-if="isTaskPanelCollapsed" class="space-y-3 p-3">
-            <div class="rounded-apple border border-apple-border bg-apple-background/35 px-3 py-3 text-center">
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">任务数</p>
-              <p class="mt-1 text-lg font-bold text-apple-text">{{ taskList.length }}</p>
+      <!-- Right: Runtime Monitor & Result -->
+      <div class="space-y-6">
+        <!-- Execution Monitor (Running/Error/Idle) -->
+        <div v-if="store.status !== 'success'" class="bg-white dark:bg-white/5 rounded-3xl p-8 space-y-8 shadow-sm">
+          <div class="flex items-center justify-between">
+            <div class="space-y-1">
+              <h2 class="text-lg font-bold text-apple-text flex items-center gap-2">
+                <Activity class="text-apple-blue" :size="20" />
+                实时监控
+              </h2>
+              <p class="text-xs text-apple-secondary-text">跟踪结构推理的实时进度与系统状态。</p>
             </div>
-
-            <button
-              v-for="task in taskList.slice(0, 6)"
-              :key="task.taskId"
-              type="button"
-              class="flex w-full items-center justify-center rounded-apple border px-2 py-3 transition-all"
-              :class="task.isActive
-                ? 'border-apple-blue/40 bg-apple-blue/5 shadow-sm'
-                : 'border-apple-border bg-white/60 dark:bg-white/5 hover:bg-apple-background/50'"
-              :title="`#${task.taskId} · ${task.badgeLabel}`"
-              @click="activateTask(task.taskId)"
-            >
-              <div
-                class="h-2.5 w-2.5 rounded-full"
-                :class="task.status === 'running' ? 'bg-apple-blue' : task.status === 'success' ? 'bg-emerald-500' : 'bg-red-500'"
-              ></div>
-            </button>
-
-            <div
-              v-if="taskList.length === 0"
-              class="rounded-apple border border-dashed border-apple-border bg-apple-background/35 px-2 py-6 text-center text-[11px] text-apple-secondary-text"
-            >
-              暂无任务
-            </div>
-          </div>
-
-          <div v-else class="space-y-4 p-4">
-            <div v-if="activeTaskCard" class="rounded-apple border border-apple-blue/15 bg-apple-blue/5 px-4 py-4">
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前焦点</p>
-              <div class="mt-3 flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-sm font-bold text-apple-text">#{{ activeTaskCard.taskId }}</p>
-                  <p class="mt-1 text-[11px] text-apple-secondary-text">
-                    {{ activeTaskCard.sequenceLength }} {{ activeTaskCard.moleculeType === 'RNA' ? 'nt' : 'aa' }} · {{ activeTaskCard.targetChains ? `${activeTaskCard.targetChains} 条链` : '自动链数' }}
-                  </p>
-                </div>
-                <span class="rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-widest" :class="activeTaskCard.badgeClass">
-                  {{ activeTaskCard.badgeLabel }}
-                </span>
+            <div class="flex items-center gap-4">
+              <div class="text-right">
+                <p class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">已耗时</p>
+                <p class="text-sm font-bold text-apple-text tabular-nums">{{ elapsedLabel }}</p>
               </div>
-              <p class="mt-3 truncate text-[11px] text-apple-secondary-text">{{ activeTaskCard.error || activeTaskCard.pythonLabel }}</p>
+              <div class="h-8 w-px bg-apple-border"></div>
+              <div class="text-right">
+                <p class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">当前阶段</p>
+                <p class="text-sm font-bold text-apple-text">{{ currentStageLabel }}</p>
+              </div>
             </div>
+          </div>
 
-            <div class="flex items-center justify-between gap-3">
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">历史切换</p>
-              <span class="rounded-full bg-apple-background px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
-                {{ taskList.length }} items
-              </span>
-            </div>
-
-            <div class="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-              <button
-                v-for="task in taskList"
-                :key="task.taskId"
-                type="button"
-                class="w-full rounded-apple border px-4 py-3 text-left transition-all"
-                :class="task.isActive
-                  ? 'border-apple-blue/40 bg-apple-blue/5 shadow-sm'
-                  : 'border-apple-border bg-white/60 dark:bg-white/5 hover:bg-apple-background/50'"
-                @click="activateTask(task.taskId)"
+          <!-- Simplified Monitor UI -->
+          <div class="space-y-4">
+            <div class="relative h-2 rounded-full bg-apple-background overflow-hidden">
+              <div 
+                class="h-full bg-apple-blue transition-all duration-700 relative" 
+                :style="{ width: `${stageProgress}%` }"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 space-y-1">
-                    <div class="flex items-center gap-2">
-                      <p class="text-xs font-bold text-apple-text">#{{ task.taskId }}</p>
-                      <span class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest" :class="task.badgeClass">
-                        {{ task.badgeLabel }}
-                      </span>
-                      <span v-if="task.isActive" class="rounded-full bg-apple-text px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-white">
-                        Current
-                      </span>
-                    </div>
-                    <p class="text-[11px] text-apple-secondary-text">
-                      {{ task.sequenceLength }} {{ task.moleculeType === 'RNA' ? 'nt' : 'aa' }} · {{ task.targetChains ? `${task.targetChains} 条链` : '自动链数' }} · {{ task.backend }}
-                    </p>
-                    <p class="truncate text-[11px] text-apple-secondary-text">
-                      {{ task.error || task.pythonLabel }}
-                    </p>
-                  </div>
-                  <div class="shrink-0 text-right">
-                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Updated</p>
-                    <p class="mt-1 text-[11px] font-semibold text-apple-text">{{ task.updatedLabel }}</p>
-                  </div>
-                </div>
-              </button>
-
-              <div v-if="taskList.length === 0" class="rounded-apple border border-dashed border-apple-border bg-apple-background/35 px-4 py-6 text-center text-[11px] text-apple-secondary-text">
-                还没有 MiniFold 历史任务。开始第一次推理后，这里会自动记录并可随时切回查看。
+                <div v-if="store.status === 'running'" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer"></div>
               </div>
             </div>
-          </div>
-        </div>
-      </aside>
-
-      <div class="min-w-0 flex-1 space-y-8">
-        <div class="grid grid-cols-1 gap-8 2xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,0.92fr)]">
-          <div class="space-y-8">
-            <div class="space-y-2">
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">执行配置</p>
-              <h2 class="text-lg font-bold text-apple-text">把输入、约束、运行方式分开确认</h2>
-              <p class="text-sm text-apple-secondary-text">三步仍然按顺序走，但每块信息单独成区，避免挤在一起看不清。</p>
-            </div>
-
-            <div class="apple-card p-6 space-y-6">
-              <div class="flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="w-8 h-8 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center">
-                    <Dna :size="16" />
-                  </div>
-                  <div>
-                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 1</p>
-                    <h3 class="text-sm font-bold text-apple-text">准备输入序列</h3>
-                    <p class="text-[11px] text-apple-secondary-text">支持 Plain 或单条 FASTA，标题行会自动忽略。</p>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-apple border border-apple-border text-[11px] font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background transition-colors"
-                    @click="fillExample"
-                  >
-                    填入示例
-                  </button>
-                  <button
-                    type="button"
-                    class="px-3 py-1.5 rounded-apple border border-apple-border text-[11px] font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background transition-colors"
-                    @click="store.sequence = ''"
-                  >
-                    清空
-                  </button>
-                </div>
-              </div>
-
-              <div class="grid gap-4 md:grid-cols-3">
-                <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">有效长度</p>
-                  <p class="mt-1 text-lg font-bold text-apple-text">{{ normalizedSequenceLength || 0 }}</p>
-                </div>
-                <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">输入状态</p>
-                  <p class="mt-1 text-sm font-semibold" :class="normalizedSequenceLength ? 'text-emerald-600 dark:text-emerald-300' : 'text-apple-secondary-text'">
-                    {{ normalizedSequenceLength ? '可以提交' : '等待填写' }}
-                  </p>
-                </div>
-                <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">格式要求</p>
-                  <p class="mt-1 text-sm font-semibold text-apple-text">单条{{ sequenceKindLabel }}</p>
-                </div>
-              </div>
-
-              <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">输入序列</label>
-                <textarea
-                  v-model="store.sequence"
-                  class="apple-input min-h-[220px] text-xs font-mono leading-relaxed p-4 bg-apple-background/50 focus:bg-white dark:focus:bg-white/5"
-                  placeholder=">sample_1&#10;MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK"
-                />
-                <p class="text-[11px] text-apple-secondary-text">建议直接粘贴单条目标{{ sequenceKindLabel }}，避免把多条分子一起放入这里。</p>
-              </div>
-            </div>
-
-            <div class="apple-card p-6 space-y-6">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-apple bg-apple-green/10 text-apple-green flex items-center justify-center">
-                  <FileText :size="16" />
-                </div>
-                <div>
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 2</p>
-                  <h3 class="text-sm font-bold text-apple-text">补充环境与链数</h3>
-                  <p class="text-[11px] text-apple-secondary-text">环境描述是选填项，链数用于告诉模型更偏向单链还是多链构象。</p>
-                </div>
-              </div>
-
-              <div class="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)]">
-                <div class="space-y-2">
-                  <div class="flex items-center justify-between">
-                    <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">环境描述</label>
-                    <span class="text-[10px] font-bold text-apple-secondary-text">{{ envLength }} 字</span>
-                  </div>
-                  <textarea
-                    v-model="store.envText"
-                    class="apple-input min-h-[140px] text-xs leading-relaxed p-4"
-                    placeholder="例如：线粒体内膜相关酶，倾向形成稳定跨膜区段，避免过度暴露疏水残基。"
-                  />
-                  <p class="text-[11px] text-apple-secondary-text">可写生物学场景、亚细胞定位、跨膜偏好或希望避免的构象倾向。</p>
-                </div>
-
-                <div v-if="store.moleculeType === 'protein'" class="space-y-4">
-                  <div class="space-y-2">
-                    <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">目标链数</label>
-                    <select
-                      :value="store.targetChains ?? ''"
-                      class="apple-input text-xs"
-                      @change="updateTargetChains"
-                    >
-                      <option v-for="item in targetChainOptions" :key="item.value || 'auto'" :value="item.value">
-                        {{ item.label }}
-                      </option>
-                    </select>
-                  </div>
-
-                  <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4 text-[11px] leading-relaxed text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">当前理解</p>
-                    <p class="mt-2">链数：{{ targetChainLabel }}</p>
-                    <p class="mt-1">环境：{{ envLength ? '已提供上下文约束' : '未提供，模型将主要依赖序列本身' }}</p>
-                  </div>
-                </div>
-                <div v-else class="space-y-4">
-                  <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4 text-[11px] leading-relaxed text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">当前理解</p>
-                    <p class="mt-2">模式：核糖核酸 (RNA)</p>
-                    <p class="mt-1">环境：{{ envLength ? '已提供上下文约束' : '未提供，模型将主要依赖序列本身' }}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="apple-card p-6 space-y-6">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                  <Cpu :size="16" />
-                </div>
-                <div>
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 3</p>
-                  <h3 class="text-sm font-bold text-apple-text">确认执行配置</h3>
-                  <p class="text-[11px] text-apple-secondary-text">这里既支持填写 Conda 环境名，也支持直接填写 Python 可执行文件路径，并把推理模式的选择权直接交给用户。</p>
-                </div>
-              </div>
-
-              <div class="space-y-2">
-                <div class="flex items-center justify-between">
-                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">Conda 环境名 / Python 路径</label>
-                  <span class="text-[10px] font-bold text-apple-secondary-text">{{ store.condaEnvName.trim() ? '用户指定' : '自动发现' }}</span>
-                </div>
-                <input
-                  v-model="store.condaEnvName"
-                  type="text"
-                  class="apple-input text-xs"
-                  placeholder="例如：minifold 或 D:\\MiniFold\\python-portable\\python.exe"
-                />
-                <p class="text-[11px] text-apple-secondary-text">留空时继续使用 `MINIFOLD_PYTHON` 或系统 Python；填环境名会执行 `conda run -n 环境名 python`，填 `.exe` / 路径则直接调用该解释器。</p>
-              </div>
-
-              <div class="space-y-4 mt-6">
-                <div class="space-y-2">
-                  <div class="flex items-center justify-between">
-                    <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">推理模式</label>
-                    <span class="text-[10px] font-bold text-apple-secondary-text">{{ inferenceModeLabel }}</span>
-                  </div>
-                  <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <button
-                      v-for="item in backendOptions"
-                      :key="item.value"
-                      type="button"
-                      class="rounded-apple border p-4 text-left transition-all"
-                      :class="selectedInferenceMode === item.value
-                        ? 'border-apple-blue/40 bg-apple-blue/5 shadow-sm'
-                        : 'border-apple-border bg-apple-background/40 hover:bg-apple-background/60'"
-                      @click="selectInferenceMode(item.value)"
-                    >
-                      <div class="flex items-center justify-between gap-3">
-                        <p class="text-xs font-bold text-apple-text">{{ item.label }}</p>
-                        <span
-                          class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest"
-                          :class="selectedInferenceMode === item.value
-                            ? 'bg-apple-blue text-white'
-                            : 'bg-apple-background text-apple-secondary-text'"
-                        >
-                          {{ selectedInferenceMode === item.value ? '当前' : '可选' }}
-                        </span>
-                      </div>
-                      <p class="mt-2 text-[11px] leading-relaxed text-apple-secondary-text">{{ item.hint }}</p>
-                    </button>
-                  </div>
-                  <p class="text-[11px] text-apple-secondary-text">
-                    {{ inferenceModeHint }}
-                    <span v-if="store.moleculeType === 'RNA'">
-                      当前 RNA 链路会保留这个选择并传给运行时，后续本地几何加速也会继续沿用这套入口。
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4">
-                <div class="flex items-center gap-2 mb-3">
-                  <Layers3 class="text-apple-blue" :size="14" />
-                  <h4 class="text-xs font-bold text-apple-text">本次执行摘要</h4>
-                </div>
-                <div class="grid gap-3 md:grid-cols-4">
-                  <div class="text-[11px] text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">输入</p>
-                    <p class="mt-1">{{ normalizedSequenceLength || 0 }} {{ sequenceUnitLabel }}</p>
-                  </div>
-                  <div class="text-[11px] text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">约束</p>
-                    <p class="mt-1">{{ targetChainLabel }} / {{ envLength ? '含环境描述' : '无环境描述' }}</p>
-                  </div>
-                  <div class="text-[11px] text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">Python</p>
-                    <p class="mt-1">{{ condaEnvLabel }}</p>
-                  </div>
-                  <div class="text-[11px] text-apple-secondary-text">
-                    <p class="font-bold text-apple-text">推理模式</p>
-                    <p class="mt-1">{{ inferenceModeLabel }}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-4 pt-2 md:flex-row md:items-center md:justify-between">
-                <p v-if="store.error" class="text-[11px] font-bold text-red-500">{{ store.error }}</p>
-                <div v-else class="text-[11px] text-apple-secondary-text">
-                  当前状态：<span class="font-bold text-apple-text">{{ selectedStructureStatus }}</span>
-                </div>
-                <div class="ml-auto flex items-center gap-3">
-                  <button
-                    type="button"
-                    class="px-4 py-2 rounded-apple border border-apple-border text-xs font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background transition-colors"
-                    @click="store.resetResult"
-                  >
-                    清空结果
-                  </button>
-                  <button
-                    type="button"
-                    class="apple-button-primary px-8 py-2.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    :disabled="store.isSubmitting || !store.sequence.trim()"
-                    @click="handleSubmit"
-                  >
-                    <template v-if="store.isSubmitting">
-                      <Loader2 class="animate-spin" :size="16" />
-                      <span>提交中...</span>
-                    </template>
-                    <template v-else>
-                      <Play :size="16" />
-                      <span>开始 MiniFold 推理</span>
-                    </template>
-                  </button>
-                </div>
+            
+            <div class="flex flex-wrap gap-2">
+              <div
+                v-for="(stage, index) in stageItems"
+                :key="stage.label"
+                class="flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold transition-all"
+                :class="stage.state === 'done' ? 'bg-emerald-500/10 text-emerald-600' : stage.state === 'active' ? 'bg-apple-blue/10 text-apple-blue' : 'bg-apple-background text-apple-secondary-text opacity-60'"
+              >
+                <span class="w-4 h-4 rounded-full flex items-center justify-center bg-current/10">{{ index + 1 }}</span>
+                <span>{{ stage.label }}</span>
               </div>
             </div>
           </div>
 
-          <div class="space-y-8 2xl:sticky 2xl:top-6">
-            <div class="space-y-2">
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">执行总览</p>
-              <h2 class="text-lg font-bold text-apple-text">运行状态和实时输出单独放一列</h2>
-              <p class="text-sm text-apple-secondary-text">提交前看准备情况，提交后盯进度和日志，不和输入表单搅在一起。</p>
-            </div>
-
-            <div class="apple-card p-6 space-y-4">
-              <div class="flex items-center justify-between gap-3">
-                <div class="space-y-1">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">运行状态</p>
-                  <h3 class="text-sm font-bold text-apple-text">{{ statusMeta.title }}</h3>
-                </div>
-                <span class="rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest" :class="statusMeta.chipClass">
-                  {{ statusMeta.chip }}
-                </span>
-              </div>
-
-              <div class="space-y-3">
-                <div
-                  v-for="item in readinessItems"
-                  :key="item.label"
-                  class="flex items-center justify-between rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3"
-                >
-                  <div class="flex items-center gap-3">
-                    <CheckCircle2 v-if="item.done" class="text-emerald-500" :size="16" />
-                    <div v-else class="w-4 h-4 rounded-full border-2 border-apple-border"></div>
-                    <div>
-                      <p class="text-xs font-semibold text-apple-text">{{ item.label }}</p>
-                      <p class="text-[11px] text-apple-secondary-text">{{ item.hint }}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3 text-[11px] leading-relaxed text-apple-secondary-text">
-                <p><span class="font-bold text-apple-text">任务 ID：</span>{{ selectedStructureId }}</p>
-                <p class="mt-1"><span class="font-bold text-apple-text">推理模式：</span>{{ inferenceModeLabel }}</p>
-                <p class="mt-1"><span class="font-bold text-apple-text">Python：</span>{{ condaEnvLabel }}</p>
-                <p class="mt-1"><span class="font-bold text-apple-text">链数：</span>{{ targetChainLabel }}</p>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest flex items-center gap-2">
+                <span class="w-1.5 h-1.5 rounded-full" :class="store.status === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-apple-border'"></span>
+                运行日志 (Terminal)
+              </label>
+              <div class="flex items-center gap-3 text-[10px] font-bold text-apple-secondary-text">
+                <button type="button" class="hover:text-apple-blue transition-colors" @click="refreshLogs">刷新</button>
+                <span class="opacity-30">|</span>
+                <span class="opacity-50 uppercase tracking-tighter">{{ runtimeSignalTone }}</span>
               </div>
             </div>
-
-            <div class="apple-card p-6 space-y-5 overflow-hidden">
-              <div class="flex items-start justify-between gap-4">
-                <div class="space-y-1">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">任务进程</p>
-                  <h3 class="text-sm font-bold text-apple-text">MiniFold Runtime Monitor</h3>
-                  <p class="text-[11px] text-apple-secondary-text">{{ runtimeHeadline }}</p>
-                </div>
-                <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-3 py-2 text-right">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Elapsed</p>
-                  <p class="mt-1 text-lg font-bold text-apple-text tabular-nums">{{ elapsedLabel }}</p>
-                </div>
-              </div>
-
-              <div class="relative overflow-hidden rounded-[28px] border border-apple-blue/15 bg-[radial-gradient(circle_at_top,#60a5fa18,transparent_52%),linear-gradient(135deg,rgba(255,255,255,0.9),rgba(255,255,255,0.55))] dark:bg-[radial-gradient(circle_at_top,#60a5fa24,transparent_52%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(15,23,42,0.8))] p-5">
-                <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-apple-blue/60 to-transparent"></div>
-                <div class="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_180px] lg:items-end">
-                  <div class="space-y-4">
-                    <div class="runtime-monitor-screen" :class="runtimeMonitorStateClass">
-                      <div class="runtime-monitor-grid"></div>
-                      <div v-if="store.status === 'running'" class="runtime-monitor-sweep"></div>
-                      <svg viewBox="0 0 640 140" preserveAspectRatio="none" class="runtime-monitor-waveform">
-                        <path
-                          d="M0 84 H640"
-                          class="runtime-monitor-baseline"
-                        />
-                        <path
-                          d="M0 84 L56 84 L84 84 L96 76 L108 84 L140 84 L164 84 L176 52 L188 106 L206 22 L220 118 L236 84 L300 84 L330 84 L344 74 L356 84 L392 84 L420 84 L434 56 L446 102 L462 28 L476 114 L492 84 L556 84 L584 84 L596 76 L608 84 L640 84"
-                          class="runtime-monitor-wave"
-                        />
-                      </svg>
-                    </div>
-                    <div class="flex flex-wrap items-end justify-between gap-4">
-                      <div>
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Heartbeat</p>
-                        <p class="mt-1 text-sm font-semibold text-apple-text">{{ runtimeSignalLabel }}</p>
-                      </div>
-                      <div class="flex items-center gap-2 rounded-full border border-white/60 dark:border-white/10 bg-white/70 dark:bg-white/5 px-3 py-1.5 text-[11px] font-bold text-apple-secondary-text">
-                        <span
-                          class="h-2.5 w-2.5 rounded-full"
-                          :class="store.status === 'running'
-                            ? 'bg-emerald-400 animate-pulse'
-                            : store.status === 'success'
-                              ? 'bg-cyan-400'
-                              : store.status === 'error'
-                                ? 'bg-rose-400'
-                                : 'bg-slate-300 dark:bg-slate-600'"
-                        ></span>
-                        {{ runtimeSignalTone }}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                    <div class="runtime-monitor-readout">
-                      <p class="runtime-monitor-readout-label">Signal</p>
-                      <p class="runtime-monitor-readout-value">{{ runtimeSignalCode }}</p>
-                    </div>
-                    <div class="runtime-monitor-readout">
-                      <p class="runtime-monitor-readout-label">Stage</p>
-                      <p class="runtime-monitor-readout-value">{{ currentStageLabel }}</p>
-                    </div>
-                    <div class="runtime-monitor-readout">
-                      <p class="runtime-monitor-readout-label">Log Sync</p>
-                      <p class="runtime-monitor-readout-value text-base">{{ logTimestampLabel }}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="space-y-3">
-                <div class="flex items-center justify-between gap-3">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">阶段进度</p>
-                  <p class="text-[11px] font-bold text-apple-text">{{ Math.round(stageProgress) }}%</p>
-                </div>
-                <div class="h-2 rounded-full bg-apple-background/70 overflow-hidden">
-                  <div class="h-full rounded-full bg-gradient-to-r from-apple-blue via-cyan-400 to-violet-500 transition-all duration-700" :style="{ width: `${stageProgress}%` }"></div>
-                </div>
-                <div class="space-y-2">
-                  <div
-                    v-for="(stage, index) in stageItems"
-                    :key="stage.label"
-                    class="rounded-apple border px-4 py-3 transition-all"
-                    :class="stage.state === 'done'
-                      ? 'border-emerald-500/20 bg-emerald-500/5'
-                      : stage.state === 'active'
-                        ? 'border-apple-blue/30 bg-apple-blue/5'
-                        : stage.state === 'error'
-                          ? 'border-red-500/20 bg-red-500/5'
-                          : 'border-apple-border bg-apple-background/35'"
-                  >
-                    <div class="flex items-start gap-3">
-                      <div
-                        class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
-                        :class="stage.state === 'done'
-                          ? 'bg-emerald-500 text-white'
-                          : stage.state === 'active'
-                            ? 'bg-apple-blue text-white'
-                            : stage.state === 'error'
-                              ? 'bg-red-500 text-white'
-                              : 'bg-apple-background text-apple-secondary-text'"
-                      >
-                        {{ index + 1 }}
-                      </div>
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-2">
-                          <p class="text-xs font-bold text-apple-text">{{ stage.label }}</p>
-                          <span
-                            class="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest"
-                            :class="stage.state === 'done'
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
-                              : stage.state === 'active'
-                                ? 'bg-apple-blue/10 text-apple-blue'
-                                : stage.state === 'error'
-                                  ? 'bg-red-500/10 text-red-500'
-                                  : 'bg-apple-background text-apple-secondary-text'"
-                          >
-                            {{ stage.state === 'done' ? 'Done' : stage.state === 'active' ? 'Active' : stage.state === 'error' ? 'Error' : 'Pending' }}
-                          </span>
-                        </div>
-                        <p class="mt-1 text-[11px] leading-relaxed text-apple-secondary-text">{{ stage.hint }}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="grid gap-3 md:grid-cols-2">
-                <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 p-4">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">最近输出</p>
-                  <div class="mt-3 space-y-2">
-                    <p
-                      v-for="(line, index) in latestLogLines"
-                      :key="`${index}-${line}`"
-                      class="rounded-2xl bg-apple-background/60 px-3 py-2 text-[11px] leading-relaxed text-apple-secondary-text"
-                    >
-                      {{ line }}
-                    </p>
-                    <p v-if="latestLogLines.length === 0" class="rounded-2xl bg-apple-background/60 px-3 py-2 text-[11px] text-apple-secondary-text">
-                      任务开始后，这里会滚动显示最新几条运行日志。
-                    </p>
-                  </div>
-                </div>
-                <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 p-4">
-                  <div class="flex items-center justify-between gap-3">
-                    <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">实时控制台</p>
-                    <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
-                      <span class="inline-flex h-2 w-2 rounded-full bg-emerald-500" :class="store.status === 'running' ? 'animate-pulse' : ''"></span>
-                      <span>{{ logTimestampLabel }}</span>
-                    </div>
-                  </div>
-                  <div
-                    ref="consoleViewport"
-                    class="mt-3 h-[260px] overflow-y-auto rounded-[24px] bg-slate-950 px-4 py-4 font-mono text-[11px] leading-6 text-emerald-300 shadow-inner"
-                    @scroll="handleLogScroll"
-                  >
-                    <template v-if="runtimeLogLines.length">
-                      <p
-                        v-for="(line, index) in runtimeLogLines"
-                        :key="`${index}-${line}`"
-                        class="whitespace-pre-wrap break-words"
-                      >
-                        <span class="text-slate-500 mr-3 select-none">{{ String(index + 1).padStart(3, '0') }}</span>{{ line }}
-                      </p>
-                    </template>
-                    <p v-else class="text-slate-400">[console] 等待任务输出...</p>
-                  </div>
-                  <div class="mt-3 flex items-center justify-between gap-3 text-[11px] text-apple-secondary-text">
-                    <span>自动滚动：{{ autoScrollLogs ? '开启' : '暂停' }}</span>
-                    <button
-                      type="button"
-                      class="rounded-full border border-apple-border px-3 py-1 font-bold text-apple-text transition-colors hover:bg-apple-background"
-                      @click="refreshLogs"
-                    >
-                      刷新日志
-                    </button>
-                  </div>
-                </div>
+            <div
+              ref="consoleViewport"
+              class="h-[420px] overflow-y-auto rounded-2xl bg-slate-950/95 p-5 font-mono text-[11px] leading-relaxed text-emerald-400"
+              @scroll="handleLogScroll"
+            >
+              <template v-if="runtimeLogLines.length">
+                <p v-for="(line, index) in runtimeLogLines" :key="index" class="whitespace-pre-wrap break-words opacity-85 hover:opacity-100 transition-opacity">
+                  <span class="text-slate-600 mr-3 select-none text-[9px]">{{ String(index + 1).padStart(3, '0') }}</span>{{ line }}
+                </p>
+              </template>
+              <div v-else class="h-full flex flex-col items-center justify-center gap-3 opacity-20">
+                <Loader2 v-if="store.status === 'running'" class="animate-spin" :size="24" />
+                <p class="text-xs italic">等待引擎输出实时日志...</p>
               </div>
             </div>
           </div>
+
+          <!-- Error Feedback -->
+          <div v-if="store.status === 'error'" class="rounded-2xl bg-red-500/5 border border-red-500/20 p-4 space-y-2">
+            <div class="flex items-center gap-2 text-red-600">
+              <AlertCircle :size="16" />
+              <span class="text-xs font-bold uppercase tracking-widest">任务执行失败</span>
+            </div>
+            <p class="text-xs text-red-600/80 leading-relaxed">{{ store.error || '发生了未知错误，请检查日志输出。' }}</p>
+          </div>
         </div>
 
-        <div class="space-y-2">
-          <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">结构结果</p>
-          <h2 class="text-lg font-bold text-apple-text">结果查看和入库独立成区</h2>
-          <p class="text-sm text-apple-secondary-text">上面负责配置和监控，下面专心看结构、下载 PDB、确认是否入库。</p>
-        </div>
-
-        <div class="apple-card overflow-hidden min-h-[720px]">
-        <template v-if="store.status === 'success' && store.viewerUrl">
-          <div class="p-6 border-b border-apple-border flex items-center justify-between bg-apple-background/30">
+        <!-- Result Showcase (Success Only) -->
+        <div v-else class="bg-white dark:bg-white/5 rounded-3xl overflow-hidden flex flex-col min-h-[680px] shadow-sm">
+          <div class="p-5 flex items-center justify-between bg-apple-background/30">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
-                <Microscope :size="16" />
+                <Sparkles :size="16" />
               </div>
               <div>
-                <h3 class="text-sm font-bold text-apple-text">MiniFold 结果</h3>
+                <h3 class="text-sm font-bold text-apple-text">预测结果</h3>
                 <p class="text-[10px] text-apple-secondary-text uppercase tracking-widest font-bold">
                   {{ store.targetChains || 'Auto' }} chains • {{ inferenceModeLabel }}
                 </p>
@@ -1264,239 +754,78 @@ onUnmounted(() => {
               </button>
               <button
                 type="button"
-                class="flex items-center gap-2 px-4 py-2 rounded-apple bg-apple-blue text-white text-[10px] font-bold uppercase tracking-widest hover:bg-apple-blue/90 transition-all"
+                class="flex items-center gap-2 px-4 py-2 rounded-apple bg-apple-blue text-white text-[10px] font-bold uppercase tracking-widest hover:bg-apple-blue/90 transition-all shadow-md shadow-apple-blue/20"
                 @click="downloadStructure"
               >
                 <Download :size="14" />
-                下载 PDB
+                PDB
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-4 min-h-[640px]">
-            <div class="md:col-span-3 bg-black/5 dark:bg-white/5 border-r border-apple-border relative group/viewer p-6">
-              <StructureViewer
-                :url="store.viewerUrl"
-                source-db="LOCAL"
-                :format="store.viewerFormat"
-                class="w-full h-full"
-              />
-
-              <div class="absolute top-10 left-10 flex flex-col gap-2">
-                <div class="px-3 py-1.5 rounded-apple bg-white/90 dark:bg-black/50 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text">
-                  {{ selectedStructureStatus }}
-                </div>
+          <div class="flex-1 relative bg-black/5 dark:bg-white/5 min-h-[400px]">
+            <StructureViewer
+              :url="store.viewerUrl!"
+              source-db="LOCAL"
+              :format="store.viewerFormat"
+              class="w-full h-full"
+            />
+            <div class="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
+              <div class="px-3 py-1.5 rounded-full bg-white/90 dark:bg-black/60 backdrop-blur text-[10px] font-bold text-apple-text">
+                ID: {{ selectedStructureId }}
               </div>
-
-              <div class="absolute bottom-10 left-10 right-10 flex gap-2 overflow-x-auto pb-2 no-scrollbar opacity-0 group-hover/viewer:opacity-100 transition-opacity">
-                <div class="px-3 py-1.5 rounded-full bg-white/80 dark:bg-black/80 backdrop-blur shadow-sm border border-apple-border text-[10px] font-bold text-apple-text whitespace-nowrap">
-                  ID: {{ selectedStructureId }}
-                </div>
-                <div class="px-3 py-1.5 rounded-full bg-apple-blue text-white shadow-sm text-[10px] font-bold whitespace-nowrap">
-                  Runtime PDB
-                </div>
+              <div v-if="qualityAssessment" class="px-3 py-1.5 rounded-full shadow-lg text-[10px] font-bold uppercase tracking-widest text-white" :class="getQualityTrackClass(qualityAssessment.overallScore)">
+                Score: {{ qualityScoreLabel }}
               </div>
             </div>
+          </div>
 
-            <div class="p-6 space-y-6 bg-apple-background/10">
-              <div v-if="qualityAssessment || resultMetrics" class="space-y-3">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">{{ resultHeadline }}</label>
-                <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 p-4 space-y-4">
-                  <template v-if="qualityAssessment">
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <p class="text-2xl font-bold text-apple-text">{{ qualityScoreLabel }}</p>
-                        <p class="mt-1 text-[11px] leading-relaxed text-apple-secondary-text">
-                          {{ qualityAssessment.summary }}
-                        </p>
-                      </div>
-                      <span class="inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest" :class="qualityLevelClass">
-                        {{ qualityAssessment.level }}
-                      </span>
-                    </div>
-
-                    <div class="space-y-3">
-                      <div
-                        v-for="dimension in qualityDimensions"
-                        :key="dimension.key"
-                        class="space-y-1.5"
-                      >
-                        <div class="flex items-center justify-between gap-3 text-[11px]">
-                          <div>
-                            <p class="font-semibold text-apple-text">{{ dimension.label }}</p>
-                            <p class="text-apple-secondary-text">{{ dimension.detail }}</p>
-                          </div>
-                          <span class="font-bold text-apple-text">{{ dimension.score }}</span>
-                        </div>
-                        <div class="h-2 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
-                          <div
-                            class="h-full rounded-full transition-all"
-                            :class="getQualityTrackClass(dimension.score)"
-                            :style="{ width: `${dimension.score}%` }"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div v-if="qualityWarnings.length" class="rounded-[20px] border border-amber-500/20 bg-amber-500/5 px-3 py-3 space-y-1.5">
-                      <p class="text-[10px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-300">复核提醒</p>
-                      <p
-                        v-for="warning in qualityWarnings"
-                        :key="warning"
-                        class="text-[11px] leading-relaxed text-amber-700 dark:text-amber-200"
-                      >
-                        {{ warning }}
-                      </p>
-                    </div>
-                  </template>
-
-                  <template v-else-if="resultMetrics">
-                    <div class="flex items-start justify-between gap-3">
-                      <div>
-                        <p class="text-2xl font-bold text-apple-text">{{ formatMetricNumber(resultMetrics.plausibilityScore, 2) }}</p>
-                        <p class="mt-1 text-[11px] leading-relaxed text-apple-secondary-text">
-                          {{ resultMetrics.summary }}
-                        </p>
-                      </div>
-                      <span class="inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-widest" :class="getQualityTrackClass(resultMetrics.plausibilityScore)">
-                        {{ resultMetrics.grade }}
-                      </span>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-2">
-                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">候选</p>
-                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ resultMetrics.selectedCandidate?.type || 'RNA' }}</p>
-                      </div>
-                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">支持度</p>
-                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ formatMetricNumber(resultMetrics.geometry?.pairSupportMean, 3) }}</p>
-                      </div>
-                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">配对数</p>
-                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ resultMetrics.topology?.pairCount ?? '--' }}</p>
-                      </div>
-                      <div class="rounded-2xl bg-apple-background/60 px-3 py-2">
-                        <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">回转半径</p>
-                        <p class="mt-1 text-xs font-semibold text-apple-text">{{ formatMetricNumber(resultMetrics.geometry?.radiusOfGyration, 2) }} A</p>
-                      </div>
-                    </div>
-
-                    <div class="space-y-3">
-                      <div
-                        v-for="dimension in rnaMetricCards"
-                        :key="dimension.key"
-                        class="space-y-1.5"
-                      >
-                        <div class="flex items-center justify-between gap-3 text-[11px]">
-                          <p class="font-semibold text-apple-text">{{ dimension.label }}</p>
-                          <span class="font-bold text-apple-text">{{ formatMetricNumber(dimension.score, 1) }}</span>
-                        </div>
-                        <div class="h-2 rounded-full bg-black/5 dark:bg-white/10 overflow-hidden">
-                          <div
-                            class="h-full rounded-full transition-all"
-                            :class="getQualityTrackClass(dimension.score)"
-                            :style="{ width: `${dimension.score}%` }"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                </div>
-              </div>
-
-              <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">执行概况</label>
-                <div class="rounded-apple border border-apple-border bg-white/50 dark:bg-white/5 p-3 text-[11px] text-apple-secondary-text leading-relaxed">
-                  <p>Python: {{ condaEnvLabel }}</p>
-                  <p>推理模式: {{ inferenceModeLabel }}</p>
-                  <p>图形加速: {{ selectedInferenceMode === 'cpu' ? '关闭' : '启用' }}</p>
-                  <p>链数: {{ store.targetChains || '自动' }}</p>
-                  <p class="mt-2">环境描述: {{ envLength ? `${envLength} 字` : '未填写' }}</p>
-                </div>
-              </div>
-
+          <!-- Result Metrics / Archive -->
+          <div class="p-5 bg-apple-background/10 space-y-4">
+            <div class="grid grid-cols-2 gap-3">
               <div class="space-y-3">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">确认入库</label>
-                <div class="rounded-apple border border-apple-border bg-white/50 dark:bg-white/5 p-4 space-y-3">
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">预测存档</label>
+                <div class="flex gap-2">
                   <input
                     v-model="libraryEntryName"
                     type="text"
-                    class="apple-input text-xs"
-                    placeholder="例如：线粒体酶候选体 A"
+                    class="apple-input text-[11px] h-9"
+                    placeholder="为结果命名..."
                   />
-                  <p class="text-[11px] leading-relaxed text-apple-secondary-text">
-                    只有在你确认并命名后，这次 MiniFold 结果才会进入“预测成果库”，不会和 accession 导入条目混在一起。
-                  </p>
-                  <p v-if="saveToLibraryError" class="text-[11px] font-bold text-red-500">{{ saveToLibraryError }}</p>
-                  <div v-if="savedLibraryEntry" class="rounded-apple border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
-                    已入库为「{{ savedLibraryEntry.proteinName }}」，编号 {{ savedLibraryEntry.code }}。
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      class="apple-button-primary !py-2 !px-4 text-xs flex items-center gap-2 disabled:opacity-50"
-                      :disabled="isSavingToLibrary || !store.lastStructureText"
-                      @click="handleSaveToLibrary"
-                    >
-                      <Loader2 v-if="isSavingToLibrary" :size="14" class="animate-spin" />
-                      <FolderPlus v-else :size="14" />
-                      确认入库
-                    </button>
-                    <button
-                      v-if="savedLibraryEntry"
-                      type="button"
-                      class="apple-button-secondary !py-2 !px-4 text-xs"
-                      @click="router.push({ path: '/library/predicted', query: { enzymeId: String(savedLibraryEntry.id) } })"
-                    >
-                      前往预测成果库
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    class="apple-button-primary !py-0 !px-4 h-9 flex items-center gap-2 shrink-0"
+                    :disabled="isSavingToLibrary"
+                    @click="handleSaveToLibrary"
+                  >
+                    <FolderPlus :size="14" />
+                  </button>
+                </div>
+              </div>
+              <div class="space-y-3">
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">操作</label>
+                <div class="flex gap-2">
+                  <button
+                    v-if="savedLibraryEntry"
+                    type="button"
+                    class="apple-button-secondary !py-0 !px-4 h-9 text-[10px] font-bold flex-1"
+                    @click="router.push({ path: '/library/predicted', query: { enzymeId: String(savedLibraryEntry.id) } })"
+                  >
+                    查看成果库
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="apple-button-secondary !py-0 !px-4 h-9 text-[10px] font-bold flex-1 opacity-50 cursor-not-allowed"
+                  >
+                    未入库
+                  </button>
                 </div>
               </div>
             </div>
+            <p v-if="saveToLibraryError" class="text-[10px] font-bold text-red-500">{{ saveToLibraryError }}</p>
           </div>
-        </template>
-
-        <template v-else-if="store.status === 'running'">
-          <div class="h-full min-h-[720px] flex flex-col items-center justify-center text-center gap-4 p-12">
-            <Loader2 class="animate-spin text-apple-blue" :size="36" />
-            <div class="space-y-2">
-              <h3 class="text-lg font-bold text-apple-text">MiniFold 推理中</h3>
-              <p class="text-sm text-apple-secondary-text">正在等待结构结果返回，完成后会自动切换到三维视图。</p>
-              <p class="text-[11px] text-apple-secondary-text">当前任务：{{ selectedStructureId }}</p>
-            </div>
-          </div>
-        </template>
-
-        <template v-else-if="store.status === 'error'">
-          <div class="h-full min-h-[720px] flex flex-col items-center justify-center text-center gap-4 p-12">
-            <div class="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center">
-              <Microscope :size="28" />
-            </div>
-            <div class="space-y-2">
-              <h3 class="text-lg font-bold text-apple-text">MiniFold 任务失败</h3>
-              <p class="text-sm text-apple-secondary-text max-w-md mx-auto">
-                {{ store.error || '发生了未知错误。' }}
-              </p>
-            </div>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="h-full min-h-[720px] flex flex-col items-center justify-center text-center gap-4 p-12">
-            <div class="w-16 h-16 rounded-full bg-apple-blue/10 text-apple-blue flex items-center justify-center">
-              <Microscope :size="28" />
-            </div>
-            <div class="space-y-2">
-              <h3 class="text-lg font-bold text-apple-text">等待返回结构</h3>
-              <p class="text-sm text-apple-secondary-text max-w-md mx-auto">
-                完成上方 3 步配置后开始推理，这里会显示最终结构结果与执行概况。
-              </p>
-            </div>
-          </div>
-        </template>
-      </div>
+        </div>
       </div>
     </div>
 
@@ -1530,129 +859,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.runtime-monitor-screen {
-  --wave-color: #60a5fa;
-  position: relative;
-  height: 172px;
-  overflow: hidden;
-  border-radius: 24px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background:
-    radial-gradient(circle at top, rgba(34, 211, 238, 0.08), transparent 45%),
-    linear-gradient(180deg, rgba(6, 18, 36, 0.96), rgba(9, 22, 41, 0.88));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 24px 48px rgba(15, 23, 42, 0.18);
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
-
-.runtime-monitor-screen.is-running {
-  --wave-color: #5eead4;
-}
-
-.runtime-monitor-screen.is-success {
-  --wave-color: #34d399;
-}
-
-.runtime-monitor-screen.is-error {
-  --wave-color: #fb7185;
-}
-
-.runtime-monitor-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(125, 211, 252, 0.09) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(125, 211, 252, 0.09) 1px, transparent 1px);
-  background-size: 40px 28px;
-  opacity: 0.55;
-}
-
-.runtime-monitor-waveform {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  height: 100%;
-  width: 100%;
-}
-
-.runtime-monitor-baseline {
-  fill: none;
-  stroke: rgba(148, 163, 184, 0.35);
-  stroke-width: 1.5;
-}
-
-.runtime-monitor-wave {
-  fill: none;
-  stroke: var(--wave-color);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 10px rgba(94, 234, 212, 0.35));
-}
-
-.runtime-monitor-screen.is-running .runtime-monitor-wave {
-  animation: runtimeWaveGlow 1.6s ease-in-out infinite;
-}
-
-.runtime-monitor-sweep {
-  position: absolute;
-  top: -12%;
-  bottom: -12%;
-  left: -18%;
-  z-index: 0;
-  width: 24%;
-  background: linear-gradient(90deg, transparent 0%, rgba(94, 234, 212, 0.03) 20%, rgba(94, 234, 212, 0.22) 52%, transparent 100%);
-  filter: blur(10px);
-  animation: runtimeSweep 2.8s linear infinite;
-}
-
-.runtime-monitor-readout {
-  border-radius: 20px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(255, 255, 255, 0.68);
-  padding: 14px 16px;
-  backdrop-filter: blur(16px);
-}
-
-.dark .runtime-monitor-readout {
-  background: rgba(15, 23, 42, 0.4);
-}
-
-.runtime-monitor-readout-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgb(100 116 139);
-}
-
-.runtime-monitor-readout-value {
-  margin-top: 6px;
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: rgb(15 23 42);
-}
-
-.dark .runtime-monitor-readout-value {
-  color: rgb(241 245 249);
-}
-
-@keyframes runtimeSweep {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(520%);
-  }
-}
-
-@keyframes runtimeWaveGlow {
-  0%,
-  100% {
-    opacity: 0.82;
-  }
-  50% {
-    opacity: 1;
-  }
+.animate-shimmer {
+  animation: shimmer 2s infinite;
 }
 </style>

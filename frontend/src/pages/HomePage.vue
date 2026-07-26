@@ -2,13 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { ArrowRight, Database, Dna, Microscope, SearchCheck, Sparkles, Activity } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
-import EnzymeLibraryTable from '@/components/EnzymeLibraryTable.vue'
 import ImportTaskCard from '@/components/ImportTaskCard.vue'
 import MetricCard from '@/components/MetricCard.vue'
 import { useNcbiImport } from '@/composables/useNcbiImport'
 import { getDashboardStats } from '@/utils/api'
 
-const { task, enzymes, refreshAll, removeEnzyme } = useNcbiImport()
+const { task, enzymes, refreshAll } = useNcbiImport()
 const stats = ref({
   enzymeCount: 0,
   successRatio: '0%',
@@ -75,7 +74,7 @@ const features = [
               开始导入 Accession
               <ArrowRight :size="16" />
             </RouterLink>
-            <RouterLink to="/library/imported" class="apple-button-secondary">
+            <RouterLink to="/library" class="apple-button-secondary">
               浏览酶库中心
             </RouterLink>
           </div>
@@ -126,7 +125,24 @@ const features = [
     <!-- Main Content Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <div class="lg:col-span-2 space-y-8">
-        <EnzymeLibraryTable :enzymes="enzymes" @delete="removeEnzyme" />
+        <RouterLink
+          to="/library"
+          class="rounded-apple-xl bg-white/40 dark:bg-white/5 p-8 hover:bg-white/60 dark:hover:bg-white/10 transition-colors shadow-apple"
+        >
+          <div class="flex items-center justify-between gap-4">
+            <div class="space-y-2">
+              <p class="text-xs font-bold text-apple-secondary-text uppercase tracking-widest">酶库中心</p>
+              <p class="text-sm font-semibold text-apple-text">选择数据仓后进入条目列表与 3D 工作站</p>
+              <p class="text-[10px] text-apple-secondary-text">导入酶库当前 {{ enzymes.length }} 条记录</p>
+            </div>
+            <ArrowRight :size="16" class="text-apple-secondary-text" />
+          </div>
+
+          <div class="mt-5 flex flex-wrap gap-2">
+            <span class="px-2 py-1 rounded-full bg-apple-blue/10 text-apple-blue text-[10px] font-bold uppercase tracking-widest">导入酶库</span>
+            <span class="px-2 py-1 rounded-full bg-purple-500/10 text-purple-500 text-[10px] font-bold uppercase tracking-widest">预测成果库</span>
+          </div>
+        </RouterLink>
       </div>
       <div class="space-y-8">
         <ImportTaskCard :task="task" />
