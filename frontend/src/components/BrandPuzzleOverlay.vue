@@ -9,6 +9,7 @@ type PieceState = BrandPuzzlePieceTemplate & {
   rotation: number
   locked: boolean
   order: number
+  settleDelay: number
 }
 
 const emit = defineEmits<{
@@ -22,10 +23,13 @@ const pieces = ref<PieceState[]>([])
 const activePieceId = ref<string | null>(null)
 const zCounter = ref(20)
 const justSolved = ref(false)
+const autoSolving = ref(false)
+const logoTapCount = ref(0)
 
 let resizeObserver: ResizeObserver | null = null
 let solvedTimer: ReturnType<typeof setTimeout> | null = null
 let finishTimer: ReturnType<typeof setTimeout> | null = null
+let logoTapTimer: ReturnType<typeof setTimeout> | null = null
 let dragState:
   | {
       id: string
@@ -111,10 +115,17 @@ function resetPuzzle() {
       rotation: scatter.rotation,
       locked: false,
       order: index + 1,
+      settleDelay: 0,
     }
   })
   activePieceId.value = null
   dragState = null
+  autoSolving.value = false
+  logoTapCount.value = 0
+  if (logoTapTimer) {
+    clearTimeout(logoTapTimer)
+    logoTapTimer = null
+  }
 }
 
 function updateStageBounds() {
@@ -134,7 +145,12 @@ function getPieceStyle(piece: PieceState) {
     top: `${piece.y}px`,
     zIndex: piece.order,
     transform: `rotate(${piece.rotation}deg) scale(${activePieceId.value === piece.id ? 1.02 : 1})`,
-    transition: activePieceId.value === piece.id ? 'none' : 'transform 180ms ease, left 180ms ease, top 180ms ease, box-shadow 180ms ease',
+    transition: activePieceId.value === piece.id
+      ? 'none'
+      : autoSolving.value
+        ? 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 220ms ease'
+        : 'transform 180ms ease, left 180ms ease, top 180ms ease, box-shadow 180ms ease',
+    transitionDelay: autoSolving.value ? `${piece.settleDelay}ms` : '0ms',
   }
 }
 
@@ -211,6 +227,45 @@ function finishDrag(piece: PieceState, event: PointerEvent) {
   }
 }
 
+function triggerEasterEggAutoSolve() {
+  if (solved.value || autoSolving.value) return
+
+  autoSolving.value = true
+  activePieceId.value = null
+  dragState = null
+  pieces.value = pieces.value.map((piece, index) => ({
+    ...piece,
+    x: getTargetX(piece),
+    y: getTargetY(piece),
+    rotation: 0,
+    locked: true,
+    order: 200 + index,
+    settleDelay: index * 42,
+  }))
+}
+
+function handleLogoTap() {
+  if (solved.value || autoSolving.value) return
+
+  logoTapCount.value += 1
+  if (logoTapTimer) {
+    clearTimeout(logoTapTimer)
+  }
+  logoTapTimer = setTimeout(() => {
+    logoTapCount.value = 0
+    logoTapTimer = null
+  }, 2000)
+
+  if (logoTapCount.value >= 5) {
+    logoTapCount.value = 0
+    if (logoTapTimer) {
+      clearTimeout(logoTapTimer)
+      logoTapTimer = null
+    }
+    triggerEasterEggAutoSolve()
+  }
+}
+
 watch(solved, (value, previousValue) => {
   if (!value || previousValue) return
   justSolved.value = true
@@ -223,6 +278,7 @@ watch(solved, (value, previousValue) => {
   solvedTimer = setTimeout(() => {
     justSolved.value = false
     solvedTimer = null
+    autoSolving.value = false
   }, 1200)
   finishTimer = setTimeout(() => {
     emit('solved')
@@ -263,7 +319,14 @@ onBeforeUnmount(() => {
     <div class="brand-puzzle-overlay__content">
       <div class="brand-puzzle-overlay__header">
         <div class="brand-puzzle-overlay__brand">
-          <BrandMark class="brand-puzzle-overlay__logo" />
+          <button
+            type="button"
+            class="brand-puzzle-overlay__logo-button"
+            aria-label="FreeWillase"
+            @click="handleLogoTap"
+          >
+            <BrandMark class="brand-puzzle-overlay__logo" />
+          </button>
           <div>
             <p class="brand-puzzle-overlay__eyebrow">Puzzle Unlock</p>
             <h2>先把 FreeWillase 拼回来</h2>
@@ -413,10 +476,31 @@ onBeforeUnmount(() => {
   gap: 1rem;
 }
 
+.brand-puzzle-overlay__logo-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.brand-puzzle-overlay__logo-button:focus-visible {
+  outline: none;
+}
+
 .brand-puzzle-overlay__logo {
   width: 3.5rem;
   height: 3.5rem;
   filter: drop-shadow(0 0 20px rgba(92, 199, 245, 0.18));
+  transition: transform 220ms ease, filter 220ms ease;
+}
+
+.brand-puzzle-overlay__logo-button:hover .brand-puzzle-overlay__logo,
+.brand-puzzle-overlay__logo-button:focus-visible .brand-puzzle-overlay__logo {
+  transform: scale(1.03);
+  filter: drop-shadow(0 0 26px rgba(92, 199, 245, 0.24));
 }
 
 .brand-puzzle-overlay__eyebrow {
