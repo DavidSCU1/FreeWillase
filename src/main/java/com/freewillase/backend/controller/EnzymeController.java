@@ -118,6 +118,11 @@ public class EnzymeController {
         return literatureMatchService.importLiteratureFromUpload(id, file);
     }
 
+    @DeleteMapping("/{id}/literatures/relations/{relationId}")
+    public void deleteLiteratureRelation(@PathVariable Long id, @PathVariable Long relationId) {
+        literatureMatchService.deleteLiteratureRelation(id, relationId);
+    }
+
     @DeleteMapping("/{id}")
     public void deleteEnzyme(@PathVariable Long id) {
         ncbiImportService.deleteEnzyme(id);

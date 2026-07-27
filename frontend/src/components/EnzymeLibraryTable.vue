@@ -18,23 +18,21 @@ function sequenceUnit(enzyme: EnzymeEntry) {
   return enzyme.moleculeType === 'RNA' ? 'nt' : 'aa'
 }
 
-function confirmDelete(id: number) {
-  if (confirm('确定要从本地酶库中移除该条目吗？该操作不可撤销。')) {
-    emit('delete', id)
-  }
+function requestDelete(id: number) {
+  emit('delete', id)
 }
 </script>
 
 <template>
   <div class="apple-card overflow-hidden">
-    <div class="p-6 flex items-center justify-between border-b border-apple-border bg-white/50 dark:bg-black/20">
+    <div class="apple-soft-panel p-6 flex items-center justify-between border-b border-white/[0.04]">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
           <FlaskConical :size="16" />
         </div>
         <div>
           <h2 class="text-sm font-bold text-apple-text tracking-tight">酶库中心</h2>
-          <p class="text-[10px] text-apple-secondary-text uppercase tracking-wider font-semibold">Enzyme Library</p>
+          <p class="text-[10px] text-apple-secondary-text uppercase tracking-wider font-semibold">本地酶库总览</p>
         </div>
       </div>
       <div class="flex items-center gap-4">
@@ -46,16 +44,16 @@ function confirmDelete(id: number) {
     <div v-if="enzymes.length" class="overflow-x-auto">
       <table class="w-full text-left border-collapse">
         <thead>
-          <tr class="bg-black/5 dark:bg-white/5 text-[10px] uppercase tracking-widest font-bold text-apple-secondary-text">
+          <tr class="bg-apple-blue/[0.04] text-[10px] uppercase tracking-widest font-bold text-apple-secondary-text">
             <th class="px-6 py-4">Accession</th>
-            <th class="px-6 py-4">Name</th>
-            <th class="px-6 py-4">Organism</th>
-            <th class="px-6 py-4">Length</th>
-            <th class="px-6 py-4">Sequence Hash</th>
-            <th class="px-6 py-4">Action</th>
+            <th class="px-6 py-4">酶名称</th>
+            <th class="px-6 py-4">物种</th>
+            <th class="px-6 py-4">长度</th>
+            <th class="px-6 py-4">序列指纹</th>
+            <th class="px-6 py-4">操作</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-apple-border">
+        <tbody class="divide-y divide-white/[0.04]">
           <tr 
             v-for="enzyme in enzymes" 
             :key="enzyme.id"
@@ -71,7 +69,7 @@ function confirmDelete(id: number) {
               <p class="text-xs text-apple-secondary-text italic">{{ enzyme.organismName }}</p>
             </td>
             <td class="px-6 py-4">
-              <span class="text-xs font-medium text-apple-secondary-text bg-apple-light-gray dark:bg-white/5 px-2 py-0.5 rounded-full">
+              <span class="apple-soft-strip text-xs font-medium text-apple-secondary-text px-2 py-0.5 rounded-full">
                 {{ enzyme.sequenceLength }} {{ sequenceUnit(enzyme) }}
               </span>
             </td>
@@ -80,7 +78,7 @@ function confirmDelete(id: number) {
             </td>
             <td class="px-6 py-4">
               <div class="flex items-center gap-2">
-                <button class="p-1.5 rounded-full hover:bg-red-500/10 text-apple-secondary-text hover:text-red-500 transition-all" title="删除条目" @click.stop="confirmDelete(enzyme.id)">
+                <button class="p-1.5 rounded-full hover:bg-red-500/10 text-apple-secondary-text hover:text-red-500 transition-all" title="删除条目" @click.stop="requestDelete(enzyme.id)">
                   <Trash2 :size="14" />
                 </button>
                 <button class="p-1.5 rounded-full hover:bg-apple-blue/10 text-apple-secondary-text hover:text-apple-blue transition-all">
@@ -97,7 +95,7 @@ function confirmDelete(id: number) {
     </div>
 
     <div v-else class="p-20 text-center">
-      <div class="w-16 h-16 bg-apple-light-gray dark:bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 text-apple-secondary-text">
+      <div class="apple-soft-panel w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-apple-secondary-text">
         <FlaskConical :size="32" />
       </div>
       <h3 class="text-sm font-bold text-apple-text mb-1">暂无酶条目</h3>

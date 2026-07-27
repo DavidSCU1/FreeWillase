@@ -17,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -39,6 +40,7 @@ public class LiteratureMatchService {
     private final LiteratureRelationMapper relationMapper;
     private final EnzymeEntryMapper enzymeMapper;
     private final NcbiEutilsClient ncbiClient;
+    private final LiteratureScanMonitorService literatureScanMonitorService;
     @org.springframework.beans.factory.annotation.Value("${app.storage.literature-dir:storage/literature}")
     private String literatureStorageDir;
     
@@ -54,9 +56,9 @@ public class LiteratureMatchService {
     private static final Pattern XML_TAG_PATTERN = Pattern.compile("(?is)<[^>]+>");
 
     @Transactional
-    public void matchLiteratureForEnzyme(Long enzymeId, String email, String apiKey) {
+    public int matchLiteratureForEnzyme(Long enzymeId, String email, String apiKey) {
         EnzymeEntry enzyme = enzymeMapper.selectById(enzymeId);
-        if (enzyme == null) return;
+        if (enzyme == null) return 0;
 
         log.info("Processing enzyme {}: {} ({})", enzymeId, enzyme.getProteinAccession(), enzyme.getName());
 
@@ -69,7 +71,7 @@ public class LiteratureMatchService {
         String name = enzyme.getName();
         String organism = enzyme.getOrganism();
         
-        if (accession == null || name == null) return;
+        if (accession == null || name == null) return 0;
 
         boolean rnaLike = isRnaLikeEntry(enzyme);
         Map<String, NcbiEutilsClient.PubMedResult> resultsMap = new LinkedHashMap<>();
@@ -95,8 +97,13 @@ public class LiteratureMatchService {
                     .forEach(result -> mergePubMedResult(resultsMap, resultBaseScores, result, plan.baseScore()));
         }
 
-        resultsMap.values().forEach(result ->
-                processPubMedResult(result, enzyme, resultBaseScores.getOrDefault(result.getPmid(), 0)));
+        int matchedCount = 0;
+        for (NcbiEutilsClient.PubMedResult result : resultsMap.values()) {
+            if (processPubMedResult(result, enzyme, resultBaseScores.getOrDefault(result.getPmid(), 0))) {
+                matchedCount++;
+            }
+        }
+        return matchedCount;
     }
 
     @org.springframework.scheduling.annotation.Async
@@ -110,25 +117,63 @@ public class LiteratureMatchService {
         log.info("Starting bulk literature match for {} enzymes. Email: {}, API Key: {}", 
             enzymes.size(), email, (apiKey != null ? "***" : "none"));
         
+        boolean partialScope = enzymeIds != null && !enzymeIds.isEmpty();
+        boolean apiKeyEnabled = apiKey != null && !apiKey.isBlank();
+        literatureScanMonitorService.start(enzymes.size(), partialScope, apiKeyEnabled);
+
         int count = 0;
-        for (EnzymeEntry enzyme : enzymes) {
-            try {
-                count++;
-                log.info("[{}/{}] Matching literature for: {}", count, enzymes.size(), enzyme.getProteinAccession());
-                self.matchLiteratureForEnzyme(enzyme.getId(), email, apiKey);
-                
-                // Rate limiting
-                Thread.sleep(apiKey != null && !apiKey.isBlank() ? 150 : 400);
-            } catch (Exception e) {
-                log.error("Failed at enzyme {}: {}", enzyme.getProteinAccession(), e.getMessage());
+        int discoveredCandidates = 0;
+        int failedCount = 0;
+        try {
+            for (EnzymeEntry enzyme : enzymes) {
+                try {
+                    count++;
+                    literatureScanMonitorService.heartbeat(
+                            enzyme,
+                            count - 1,
+                            enzymes.size(),
+                            discoveredCandidates,
+                            failedCount,
+                            String.format("正在扫描第 %d / %d 个酶：%s", count, enzymes.size(), enzyme.getProteinAccession())
+                    );
+                    log.info("[{}/{}] Matching literature for: {}", count, enzymes.size(), enzyme.getProteinAccession());
+                    int matchedCount = self.matchLiteratureForEnzyme(enzyme.getId(), email, apiKey);
+                    discoveredCandidates += matchedCount;
+                    literatureScanMonitorService.heartbeat(
+                            enzyme,
+                            count,
+                            enzymes.size(),
+                            discoveredCandidates,
+                            failedCount,
+                            String.format("已完成 %s，新增 %d 条候选文献。", enzyme.getProteinAccession(), matchedCount)
+                    );
+
+                    // Rate limiting
+                    Thread.sleep(apiKeyEnabled ? 150 : 400);
+                } catch (Exception e) {
+                    failedCount++;
+                    literatureScanMonitorService.heartbeat(
+                            enzyme,
+                            count,
+                            enzymes.size(),
+                            discoveredCandidates,
+                            failedCount,
+                            String.format("%s 扫描失败：%s", enzyme.getProteinAccession(), e.getMessage())
+                    );
+                    log.error("Failed at enzyme {}: {}", enzyme.getProteinAccession(), e.getMessage());
+                }
             }
+            log.info("Bulk literature match completed. Processed {} enzymes.", count);
+            literatureScanMonitorService.complete(count, enzymes.size(), discoveredCandidates, failedCount);
+        } catch (Exception e) {
+            literatureScanMonitorService.fail("文献扫描异常结束：" + e.getMessage());
+            log.error("Bulk literature match failed: {}", e.getMessage(), e);
         }
-        log.info("Bulk literature match completed. Processed {} enzymes.", count);
     }
 
-    private void processPubMedResult(NcbiEutilsClient.PubMedResult pubMed, EnzymeEntry enzyme, int baseScore) {
+    private boolean processPubMedResult(NcbiEutilsClient.PubMedResult pubMed, EnzymeEntry enzyme, int baseScore) {
         int score = calculateScore(pubMed, enzyme, baseScore);
-        if (score < 40) return; // Higher threshold for automatic matching
+        if (score < 40) return false; // Higher threshold for automatic matching
 
         // Save literature record
         LiteratureRecord lit = LiteratureRecord.builder()
@@ -203,6 +248,7 @@ public class LiteratureMatchService {
             }
             relationMapper.updateById(existingRelation);
         }
+        return true;
     }
 
     private int calculateScore(NcbiEutilsClient.PubMedResult pubMed, EnzymeEntry enzyme, int baseScore) {
@@ -493,6 +539,33 @@ public class LiteratureMatchService {
         return buildDisplayRecord(relation, record);
     }
 
+    @Transactional
+    public void deleteLiteratureRelation(Long enzymeId, Long relationId) {
+        LiteratureRelation relation = relationMapper.selectById(relationId);
+        if (relation == null) {
+            throw new IllegalArgumentException("未找到对应的文献关联记录");
+        }
+        if (!enzymeId.equals(relation.getEnzymeId())) {
+            throw new IllegalArgumentException("该文献不属于当前酶条目");
+        }
+
+        LiteratureRecord record = literatureMapper.selectById(relation.getLiteratureId());
+        relationMapper.deleteById(relationId);
+
+        if (record == null || !SOURCE_DB_LOCAL_UPLOAD.equals(record.getSourceDb())) {
+            return;
+        }
+
+        Long remainingRelations = relationMapper.selectCount(new LambdaQueryWrapper<LiteratureRelation>()
+                .eq(LiteratureRelation::getLiteratureId, record.getId()));
+        if (remainingRelations != null && remainingRelations > 0) {
+            return;
+        }
+
+        deleteAttachmentQuietly(record.getAttachmentPath());
+        literatureMapper.deleteById(record.getId());
+    }
+
     private List<EnzymeEntry> loadTargetEnzymes(List<Long> enzymeIds) {
         if (enzymeIds == null || enzymeIds.isEmpty()) {
             return enzymeMapper.selectList(null);
@@ -637,6 +710,19 @@ public class LiteratureMatchService {
             return false;
         }
         return Files.exists(Paths.get(attachmentPath));
+    }
+
+    private void deleteAttachmentQuietly(String attachmentPath) {
+        if (attachmentPath == null || attachmentPath.isBlank()) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(Paths.get(attachmentPath));
+        } catch (NoSuchFileException ignored) {
+            // Attachment was already removed outside the platform.
+        } catch (Exception ex) {
+            log.warn("Failed to delete attachment {}: {}", attachmentPath, ex.getMessage());
+        }
     }
 
     private LiteratureRecord createLocalUploadRecord(Path sourcePath) {

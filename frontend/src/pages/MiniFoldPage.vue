@@ -193,10 +193,10 @@ const runtimeSignalLabel = computed(() => {
   return '待机'
 })
 const runtimeSignalTone = computed(() => {
-  if (store.status === 'success') return 'Result Locked'
-  if (store.status === 'error') return 'Signal Lost'
-  if (store.status === 'running') return 'Signal Live'
-  return 'Standby'
+  if (store.status === 'success') return '结果已固化'
+  if (store.status === 'error') return '信号中断'
+  if (store.status === 'running') return '信号在线'
+  return '待命'
 })
 const runtimeSignalCode = computed(() => {
   if (store.status === 'success') return 'DONE'
@@ -227,7 +227,7 @@ const statusMeta = computed(() => {
     return {
       title: '预测成功',
       description: '结构已生成。',
-      chip: 'Success',
+      chip: '已完成',
       chipClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
     }
   }
@@ -235,7 +235,7 @@ const statusMeta = computed(() => {
     return {
       title: '运行中',
       description: '正在推理。',
-      chip: 'Running',
+      chip: '运行中',
       chipClass: 'bg-apple-blue/10 text-apple-blue',
     }
   }
@@ -243,14 +243,14 @@ const statusMeta = computed(() => {
     return {
       title: '执行失败',
       description: store.error || '任务中断。',
-      chip: 'Error',
+      chip: '异常',
       chipClass: 'bg-red-500/10 text-red-500',
     }
   }
   return {
     title: '准备推理',
     description: '确认配置后启动。',
-    chip: 'Idle',
+    chip: '待提交',
     chipClass: 'bg-apple-background text-apple-secondary-text',
   }
 })
@@ -266,7 +266,7 @@ const qualityLevelClass = computed(() => {
   const score = qualityAssessment.value?.overallScore ?? 0
   if (score >= 85) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
   if (score >= 72) return 'bg-apple-blue/10 text-apple-blue'
-  if (score >= 58) return 'bg-amber-500/10 text-amber-600 dark:text-amber-300'
+  if (score >= 58) return 'bg-amber-400/10 text-amber-300'
   return 'bg-red-500/10 text-red-500'
 })
 const rnaMetricCards = computed(() => {
@@ -307,7 +307,7 @@ const suggestedLibraryName = computed(() => {
 function getQualityTrackClass(score: number) {
   if (score >= 85) return 'bg-emerald-500'
   if (score >= 72) return 'bg-apple-blue'
-  if (score >= 58) return 'bg-amber-500'
+  if (score >= 58) return 'bg-amber-400'
   return 'bg-red-500'
 }
 
@@ -316,8 +316,8 @@ function formatMetricNumber(value: number | null | undefined, digits = 2) {
 }
 
 function fillExample() {
-  store.sequence = store.moleculeType === 'protein' ? `>sample_1
-MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK` : `>sample_rna
+  store.sequence = store.moleculeType === 'protein' ? `>freewillase_enzyme_candidate
+MKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK` : `>freewillase_rna_candidate
 GGGCUAUUAGCUCAGUUGGUUAGAGCGCACCCCUGAUAAGGGUGAGGUCGCUGAUUCGAAUUCAGCAUAGCCCA`;
   if (!store.envText.trim()) {
     store.envText = store.moleculeType === 'protein' 
@@ -514,7 +514,7 @@ onUnmounted(() => {
 <template>
   <div class="space-y-6 pb-20">
     <!-- Top Action Bar -->
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-white dark:bg-white/5 rounded-2xl p-4 shadow-sm">
+    <div class="apple-soft-panel flex flex-col gap-4 rounded-2xl p-4 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex items-center gap-4">
         <button
           type="button"
@@ -525,17 +525,17 @@ onUnmounted(() => {
           返回
         </button>
         <div class="h-4 w-px bg-apple-border"></div>
-        <div class="flex items-center bg-apple-background/50 p-1 rounded-full border border-apple-border">
+        <div class="flex items-center rounded-full bg-apple-background/32 p-1 shadow-[inset_0_1px_0_rgba(148,163,184,0.03)]">
           <button
             class="px-4 py-1 text-[10px] font-bold rounded-full transition-all duration-200"
-            :class="store.moleculeType === 'protein' ? 'bg-apple-blue text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
+            :class="store.moleculeType === 'protein' ? 'bg-[linear-gradient(135deg,rgba(9,13,24,0.96),rgba(92,199,245,0.7))] text-white shadow-[0_10px_24px_-18px_rgba(92,199,245,0.22)]' : 'text-apple-secondary-text hover:text-apple-text'"
             @click="store.moleculeType = 'protein'"
           >
-            Protein
+            蛋白
           </button>
           <button
             class="px-4 py-1 text-[10px] font-bold rounded-full transition-all duration-200"
-            :class="store.moleculeType === 'RNA' ? 'bg-emerald-500 text-white shadow-sm' : 'text-apple-secondary-text hover:text-apple-text'"
+            :class="store.moleculeType === 'RNA' ? 'bg-[linear-gradient(135deg,rgba(8,16,26,0.96),rgba(103,218,205,0.72))] text-white shadow-[0_10px_24px_-18px_rgba(103,218,205,0.2)]' : 'text-apple-secondary-text hover:text-apple-text'"
             @click="store.moleculeType = 'RNA'"
           >
             RNA
@@ -561,7 +561,7 @@ onUnmounted(() => {
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <!-- Left: Execution Configuration -->
       <div class="space-y-6">
-        <div class="bg-white dark:bg-white/5 rounded-3xl p-8 space-y-8 shadow-sm">
+        <div class="apple-card rounded-3xl p-8 space-y-8">
           <!-- Header Section -->
           <div class="space-y-2">
             <h2 class="text-lg font-bold text-apple-text flex items-center gap-2">
@@ -616,20 +616,20 @@ onUnmounted(() => {
           <!-- Engine Path -->
           <div class="space-y-3">
             <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">推理引擎路径 (Python/Conda)</label>
-            <input v-model="store.condaEnvName" type="text" class="apple-input text-xs" placeholder="自动发现 或 指定具体路径..." />
+            <input v-model="store.condaEnvName" type="text" class="apple-input text-xs" placeholder="自动发现，或填写 Python/Conda 具体路径..." />
           </div>
           
-          <div class="flex items-center justify-between pt-6 border-t border-apple-border">
+          <div class="flex items-center justify-between pt-6 border-t border-apple-border/50">
             <div class="flex items-center gap-4">
               <div v-for="item in readinessItems" :key="item.label" class="flex items-center gap-1.5">
                 <CheckCircle2 v-if="item.done" class="text-emerald-500" :size="12" />
-                <div v-else class="w-2 h-2 rounded-full bg-apple-background border border-apple-border"></div>
+                <div v-else class="w-2 h-2 rounded-full bg-apple-background/50 shadow-[inset_0_0_0_1px_rgba(71,85,105,0.14)]"></div>
                 <span class="text-[10px] font-bold text-apple-secondary-text">{{ item.label }}</span>
               </div>
             </div>
             <button
               type="button"
-              class="apple-button-primary px-8 py-2.5 flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-apple-blue/20"
+              class="apple-button-primary px-8 py-2.5 flex items-center gap-2 disabled:opacity-50 shadow-[0_18px_38px_-28px_rgba(56,189,248,0.28)]"
               :disabled="store.isSubmitting || !store.sequence.trim()"
               @click="handleSubmit"
             >
@@ -644,7 +644,7 @@ onUnmounted(() => {
       <!-- Right: Runtime Monitor & Result -->
       <div class="space-y-6">
         <!-- Execution Monitor (Running/Error/Idle) -->
-        <div v-if="store.status !== 'success'" class="bg-white dark:bg-white/5 rounded-3xl p-8 space-y-8 shadow-sm">
+        <div v-if="store.status !== 'success'" class="apple-card rounded-3xl p-8 space-y-8">
           <div class="flex items-center justify-between">
             <div class="space-y-1">
               <h2 class="text-lg font-bold text-apple-text flex items-center gap-2">
@@ -673,7 +673,7 @@ onUnmounted(() => {
                 class="h-full bg-apple-blue transition-all duration-700 relative" 
                 :style="{ width: `${stageProgress}%` }"
               >
-                <div v-if="store.status === 'running'" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer"></div>
+                <div v-if="store.status === 'running'" class="absolute inset-0 bg-gradient-to-r from-transparent via-apple-blue/20 to-transparent animate-shimmer"></div>
               </div>
             </div>
             
@@ -682,7 +682,7 @@ onUnmounted(() => {
                 v-for="(stage, index) in stageItems"
                 :key="stage.label"
                 class="flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold transition-all"
-                :class="stage.state === 'done' ? 'bg-emerald-500/10 text-emerald-600' : stage.state === 'active' ? 'bg-apple-blue/10 text-apple-blue' : 'bg-apple-background text-apple-secondary-text opacity-60'"
+                :class="stage.state === 'done' ? 'bg-emerald-500/10 text-emerald-300' : stage.state === 'active' ? 'bg-apple-blue/10 text-apple-blue' : 'bg-apple-background/45 text-apple-secondary-text opacity-75'"
               >
                 <span class="w-4 h-4 rounded-full flex items-center justify-center bg-current/10">{{ index + 1 }}</span>
                 <span>{{ stage.label }}</span>
@@ -704,12 +704,12 @@ onUnmounted(() => {
             </div>
             <div
               ref="consoleViewport"
-              class="h-[420px] overflow-y-auto rounded-2xl bg-slate-950/95 p-5 font-mono text-[11px] leading-relaxed text-emerald-400"
+              class="h-[420px] overflow-y-auto rounded-2xl border border-apple-border/40 bg-[linear-gradient(180deg,rgba(5,9,18,0.96),rgba(8,13,24,0.94))] p-5 font-mono text-[11px] leading-relaxed text-emerald-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
               @scroll="handleLogScroll"
             >
               <template v-if="runtimeLogLines.length">
                 <p v-for="(line, index) in runtimeLogLines" :key="index" class="whitespace-pre-wrap break-words opacity-85 hover:opacity-100 transition-opacity">
-                  <span class="text-slate-600 mr-3 select-none text-[9px]">{{ String(index + 1).padStart(3, '0') }}</span>{{ line }}
+                  <span class="mr-3 select-none text-[9px] text-slate-600/80">{{ String(index + 1).padStart(3, '0') }}</span>{{ line }}
                 </p>
               </template>
               <div v-else class="h-full flex flex-col items-center justify-center gap-3 opacity-20">
@@ -720,17 +720,17 @@ onUnmounted(() => {
           </div>
 
           <!-- Error Feedback -->
-          <div v-if="store.status === 'error'" class="rounded-2xl bg-red-500/5 border border-red-500/20 p-4 space-y-2">
-            <div class="flex items-center gap-2 text-red-600">
+          <div v-if="store.status === 'error'" class="rounded-2xl bg-red-500/[0.05] p-4 space-y-2 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.12)]">
+            <div class="flex items-center gap-2 text-red-400">
               <AlertCircle :size="16" />
               <span class="text-xs font-bold uppercase tracking-widest">任务执行失败</span>
             </div>
-            <p class="text-xs text-red-600/80 leading-relaxed">{{ store.error || '发生了未知错误，请检查日志输出。' }}</p>
+            <p class="text-xs text-red-300/80 leading-relaxed">{{ store.error || '发生了未知错误，请检查日志输出。' }}</p>
           </div>
         </div>
 
         <!-- Result Showcase (Success Only) -->
-        <div v-else class="bg-white dark:bg-white/5 rounded-3xl overflow-hidden flex flex-col min-h-[680px] shadow-sm">
+        <div v-else class="apple-card rounded-3xl overflow-hidden flex flex-col min-h-[680px]">
           <div class="p-5 flex items-center justify-between bg-apple-background/30">
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
@@ -739,14 +739,14 @@ onUnmounted(() => {
               <div>
                 <h3 class="text-sm font-bold text-apple-text">预测结果</h3>
                 <p class="text-[10px] text-apple-secondary-text uppercase tracking-widest font-bold">
-                  {{ store.targetChains || 'Auto' }} chains • {{ inferenceModeLabel }}
+                  {{ store.targetChains ? `${store.targetChains} 条链` : '自动判定链数' }} • {{ inferenceModeLabel }}
                 </p>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-apple-secondary-text transition-colors"
+                class="p-2 rounded-full hover:bg-apple-background/55 text-apple-secondary-text transition-colors"
                 title="全屏查看"
                 @click="showFullscreenViewer = true"
               >
@@ -754,7 +754,7 @@ onUnmounted(() => {
               </button>
               <button
                 type="button"
-                class="flex items-center gap-2 px-4 py-2 rounded-apple bg-apple-blue text-white text-[10px] font-bold uppercase tracking-widest hover:bg-apple-blue/90 transition-all shadow-md shadow-apple-blue/20"
+                class="flex items-center gap-2 px-4 py-2 rounded-apple bg-[linear-gradient(135deg,rgba(9,13,24,0.96),rgba(92,199,245,0.72))] text-white text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_12px_30px_-18px_rgba(92,199,245,0.22)]"
                 @click="downloadStructure"
               >
                 <Download :size="14" />
@@ -763,7 +763,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="flex-1 relative bg-black/5 dark:bg-white/5 min-h-[400px]">
+          <div class="flex-1 relative min-h-[400px] bg-[radial-gradient(circle_at_top,rgba(92,199,245,0.06),transparent_28%),linear-gradient(180deg,rgba(7,11,23,0.94),rgba(9,14,25,0.84))]">
             <StructureViewer
               :url="store.viewerUrl!"
               source-db="LOCAL"
@@ -771,7 +771,7 @@ onUnmounted(() => {
               class="w-full h-full"
             />
             <div class="absolute bottom-4 left-4 right-4 flex justify-between items-end pointer-events-none">
-              <div class="px-3 py-1.5 rounded-full bg-white/90 dark:bg-black/60 backdrop-blur text-[10px] font-bold text-apple-text">
+              <div class="px-3 py-1.5 rounded-full bg-[rgba(9,14,25,0.58)] backdrop-blur text-[10px] font-bold text-white/90 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04),0_12px_30px_-18px_rgba(92,199,245,0.18)]">
                 ID: {{ selectedStructureId }}
               </div>
               <div v-if="qualityAssessment" class="px-3 py-1.5 rounded-full shadow-lg text-[10px] font-bold uppercase tracking-widest text-white" :class="getQualityTrackClass(qualityAssessment.overallScore)">
@@ -831,16 +831,16 @@ onUnmounted(() => {
 
     <transition name="fade">
       <div v-if="showFullscreenViewer && store.viewerUrl && store.status === 'success'" class="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col">
-        <div class="h-16 px-8 flex items-center justify-between border-b border-white/10">
+        <div class="h-16 px-8 flex items-center justify-between border-b border-apple-border/60 bg-[rgba(5,9,18,0.38)]">
           <div class="flex items-center gap-4">
-            <h3 class="text-white font-bold">MiniFold 结果</h3>
-            <span class="px-2 py-0.5 rounded-full bg-apple-blue text-white text-[10px] font-bold uppercase tracking-widest">
+            <h3 class="text-white font-bold">MiniFold 结构结果</h3>
+            <span class="px-2 py-0.5 rounded-full bg-apple-blue/90 text-white text-[10px] font-bold uppercase tracking-widest">
               {{ selectedStructureId }}
             </span>
           </div>
           <button
             type="button"
-            class="w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all"
+            class="w-10 h-10 rounded-full bg-[rgba(9,14,25,0.54)] text-white flex items-center justify-center hover:bg-[rgba(12,18,30,0.82)] transition-all shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]"
             @click="showFullscreenViewer = false"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>

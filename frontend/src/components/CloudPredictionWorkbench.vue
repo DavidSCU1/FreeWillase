@@ -44,8 +44,8 @@ const providerMeta = computed(() => {
       providerLabel: 'trRosettaRNA',
       inputLabel: '输入 RNA 序列',
       inputHint: '支持单条 FASTA (≤ 400nt)。由于模拟网页请求，预测可能需要数分钟，请耐心等待。',
-      inputPlaceholder: '>sample_rna\nGGCUCGUGGCGAAAGGGUA...',
-      example: '>sample_rna\nGGCUCGUGGCGAAAGGGUA',
+      inputPlaceholder: '>freewillase_rna_candidate\nGGCUCGUGGCGAAAGGGUA...',
+      example: '>freewillase_rna_candidate\nGGCUCGUGGCGAAAGGGUA',
       typeLabel: 'RNA',
       modeLabel: '单条',
       modelLabel: 'trRosettaRNA',
@@ -62,8 +62,8 @@ const providerMeta = computed(() => {
     providerLabel: 'NVIDIA ESMFold',
     inputLabel: '输入蛋白序列',
     inputHint: '支持 Plain 或单条 FASTA，标题行会自动忽略。',
-    inputPlaceholder: '>sample_1\nMKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK',
-    example: '>sample_1\nMKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK',
+    inputPlaceholder: '>freewillase_enzyme_candidate\nMKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK',
+    example: '>freewillase_enzyme_candidate\nMKTFFVLLLCTFTVQAAPDAGVTKTYLQDVGGKSTLQKQLAELNQGQKELAAKLEQKQK',
     typeLabel: 'protein',
     modeLabel: '单条',
     modelLabel: 'esmfold',
@@ -133,7 +133,7 @@ const statusMeta = computed(() => {
     return {
       title: '结果已就绪',
       description: '当前任务已经完成，可以直接查看结构或下载结果。',
-      chip: 'Success',
+      chip: '已完成',
       chipClass: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
     }
   }
@@ -141,7 +141,7 @@ const statusMeta = computed(() => {
     return {
       title: '任务执行中',
       description: '任务已经提交，结果返回后会自动切换到结果区。',
-      chip: 'Running',
+      chip: '运行中',
       chipClass: 'bg-apple-blue/10 text-apple-blue',
     }
   }
@@ -149,14 +149,14 @@ const statusMeta = computed(() => {
     return {
       title: '等待修正后重试',
       description: currentTask.value?.error || store.error || '请检查输入内容和执行配置后重新提交。',
-      chip: 'Error',
+      chip: '异常',
       chipClass: 'bg-red-500/10 text-red-500',
     }
   }
   return {
     title: '准备提交预测',
     description: '这条工作台只处理当前引擎，填写好输入内容后即可直接运行。',
-    chip: 'Idle',
+    chip: '待提交',
     chipClass: 'bg-apple-background text-apple-secondary-text',
   }
 })
@@ -181,7 +181,7 @@ function ensureProviderTaskSelected(tasks: PredictionTask[]) {
 function fillExample() {
   store.sequence = providerMeta.value.example
   if (!store.name.trim()) {
-    store.name = props.provider === 'trrosettarna' ? 'RNA sample' : 'Protein sample'
+    store.name = props.provider === 'trrosettarna' ? '候选 RNA 结构任务' : '候选蛋白结构任务'
   }
 }
 
@@ -216,7 +216,7 @@ async function applyRoutePrefill() {
       ? route.query.name.trim()
       : (typeof route.query.accession === 'string' && route.query.accession.trim()
         ? route.query.accession.trim()
-        : 'RNA sample')
+        : '候选 RNA 结构任务')
 
     store.name = prefillName
     store.sequence = `>${prefillName}\n${normalizedSequence}`
@@ -344,7 +344,7 @@ onUnmounted(() => {
         返回预测入口
       </button>
 
-      <div class="apple-card p-6 md:p-7 bg-gradient-to-br from-apple-blue/8 via-transparent to-purple-500/8 border-apple-blue/10">
+      <div class="apple-card p-6 md:p-7 bg-[linear-gradient(180deg,rgba(7,11,23,0.42),rgba(7,11,23,0.16))]">
         <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div class="space-y-3">
             <div class="flex items-center gap-3">
@@ -379,7 +379,7 @@ onUnmounted(() => {
             <div
               v-for="item in summaryItems"
               :key="item.label"
-              class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3"
+              class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.025)]"
             >
               <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">{{ item.label }}</p>
               <p class="mt-1 text-sm font-semibold text-apple-text">{{ item.value }}</p>
@@ -397,30 +397,30 @@ onUnmounted(() => {
               <Settings :size="16" />
             </div>
             <div>
-              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 1</p>
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">步骤 1</p>
               <h3 class="text-sm font-bold text-apple-text">确认工作台配置</h3>
             </div>
           </div>
 
           <div class="grid gap-4 md:grid-cols-3">
-            <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
+            <div class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
               <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">固定引擎</p>
               <p class="mt-1 text-sm font-semibold text-apple-text">{{ providerMeta.providerLabel }}</p>
             </div>
-            <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
+            <div class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
               <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">分子类型</p>
               <p class="mt-1 text-sm font-semibold text-apple-text">{{ providerMeta.typeLabel }}</p>
             </div>
-            <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
+            <div class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
               <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">模型版本</p>
               <p class="mt-1 text-sm font-semibold text-apple-text">{{ providerMeta.modelLabel }}</p>
             </div>
           </div>
 
-          <div v-if="providerMeta.needsApiKey" class="mt-6 pt-6 border-t border-apple-border space-y-4">
+          <div v-if="providerMeta.needsApiKey" class="mt-6 pt-6 border-t border-white/[0.04] space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">API Key / Token</label>
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">访问密钥 / Token</label>
                 <input
                   v-model="store.apiKey"
                   type="password"
@@ -429,7 +429,7 @@ onUnmounted(() => {
                 >
               </div>
               <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">Base URL (可选)</label>
+                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">接口地址（可选）</label>
                 <input
                   v-model="store.baseUrl"
                   type="text"
@@ -441,8 +441,8 @@ onUnmounted(() => {
             <p class="text-[11px] text-apple-secondary-text">{{ providerMeta.apiHint }}</p>
           </div>
 
-          <div v-else class="mt-6 pt-6 border-t border-apple-border">
-            <div class="rounded-apple border border-apple-border bg-apple-background/35 p-4 text-[11px] leading-relaxed text-apple-secondary-text">
+          <div v-else class="mt-6 pt-6 border-t border-white/[0.04]">
+            <div class="rounded-apple bg-apple-background/28 p-4 text-[11px] leading-relaxed text-apple-secondary-text shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
               {{ providerMeta.apiHint }}
             </div>
           </div>
@@ -455,13 +455,13 @@ onUnmounted(() => {
                 <Dna :size="16" />
               </div>
               <div>
-                <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">Step 2</p>
+              <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">步骤 2</p>
                 <h3 class="text-sm font-bold text-apple-text">{{ providerMeta.inputLabel }}</h3>
               </div>
             </div>
             <button
               type="button"
-              class="px-3 py-1.5 rounded-apple border border-apple-border text-[11px] font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background transition-colors"
+              class="px-3 py-1.5 rounded-apple bg-apple-background/24 text-[11px] font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background/36 transition-colors shadow-[inset_0_0_0_1px_rgba(71,85,105,0.08)]"
               @click="fillExample"
             >
               填入示例
@@ -470,17 +470,17 @@ onUnmounted(() => {
 
           <div class="space-y-4">
             <div class="grid gap-4 md:grid-cols-3">
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
+              <div class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">输入长度</p>
                 <p class="mt-1 text-lg font-bold text-apple-text">{{ normalizedInputLength }}</p>
               </div>
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
+              <div class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">输入状态</p>
                 <p class="mt-1 text-sm font-semibold" :class="hasInput ? 'text-emerald-600 dark:text-emerald-300' : 'text-apple-secondary-text'">
                   {{ hasInput ? '可以提交' : '等待填写' }}
                 </p>
               </div>
-              <div class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3">
+              <div class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">格式要求</p>
                 <p class="mt-1 text-sm font-semibold text-apple-text">{{ providerMeta.modeLabel }} {{ providerMeta.typeLabel }}</p>
               </div>
@@ -490,7 +490,7 @@ onUnmounted(() => {
               <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">输入序列</label>
               <textarea
                 v-model="store.sequence"
-                class="apple-input min-h-[220px] text-xs font-mono leading-relaxed p-4 bg-apple-background/50 focus:bg-white dark:focus:bg-white/5"
+                class="apple-input min-h-[220px] text-xs font-mono leading-relaxed p-4 bg-apple-background/45 focus:bg-apple-background/65"
                 :placeholder="providerMeta.inputPlaceholder"
               />
               <p class="text-[11px] text-apple-secondary-text">{{ providerMeta.inputHint }}</p>
@@ -502,12 +502,12 @@ onUnmounted(() => {
                   v-model="store.name"
                   type="text"
                   class="apple-input text-xs"
-                  placeholder="任务名称 (可选)..."
+                  placeholder="为这次预测填写任务名（可选）..."
                 >
               </div>
               <button
                 type="button"
-                class="px-4 py-2 rounded-apple border border-apple-border text-xs font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background transition-colors"
+                class="px-4 py-2 rounded-apple bg-apple-background/24 text-xs font-bold text-apple-secondary-text hover:text-apple-text hover:bg-apple-background/36 transition-colors shadow-[inset_0_0_0_1px_rgba(71,85,105,0.08)]"
                 @click="clearInput"
               >
                 清空输入
@@ -535,7 +535,7 @@ onUnmounted(() => {
 
         <div class="apple-card overflow-hidden min-h-[620px]">
           <template v-if="currentTask?.status === 'success' && currentTask.result">
-            <div class="p-6 border-b border-apple-border flex items-center justify-between bg-apple-background/30">
+            <div class="p-6 border-b border-apple-border/50 flex items-center justify-between bg-apple-background/22">
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
                   <Microscope :size="16" />
@@ -549,7 +549,7 @@ onUnmounted(() => {
               </div>
               <button
                 type="button"
-                class="flex items-center gap-2 px-4 py-2 rounded-apple bg-apple-blue text-white text-[10px] font-bold uppercase tracking-widest hover:bg-apple-blue/90 transition-all"
+                class="flex items-center gap-2 px-4 py-2 rounded-apple bg-[linear-gradient(135deg,rgba(9,13,24,0.96),rgba(92,199,245,0.72))] text-white text-[10px] font-bold uppercase tracking-widest transition-all shadow-[0_12px_30px_-18px_rgba(92,199,245,0.22)]"
                 @click="downloadStructure"
               >
                 <Download :size="14" />
@@ -558,7 +558,7 @@ onUnmounted(() => {
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-4 min-h-[540px]">
-              <div class="md:col-span-3 bg-black/5 dark:bg-white/5 border-r border-apple-border">
+              <div class="md:col-span-3 bg-[linear-gradient(180deg,rgba(8,12,23,0.82),rgba(9,14,25,0.62))] border-r border-apple-border/50">
                 <StructureViewer
                   v-if="store.viewerUrl"
                   :url="store.viewerUrl"
@@ -576,7 +576,7 @@ onUnmounted(() => {
 
               <div class="p-6 space-y-6 bg-apple-background/10">
                 <div v-if="currentTask.result.plddt != null" class="space-y-2">
-                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">Confidence (pLDDT)</label>
+                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">置信度（pLDDT）</label>
                   <div class="flex items-end gap-2">
                     <span class="text-3xl font-bold text-apple-text tracking-tighter">{{ currentTask.result.plddt.toFixed(1) }}</span>
                     <span class="text-[10px] font-bold text-apple-secondary-text mb-1.5">%</span>
@@ -584,20 +584,20 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="currentTask.result.ptm != null" class="space-y-2">
-                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">Global Score (pTM)</label>
+                  <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">全局评分（pTM）</label>
                   <div class="text-xl font-bold text-apple-text">{{ currentTask.result.ptm.toFixed(3) }}</div>
                 </div>
 
                 <div v-if="currentTask.result.analysis" class="space-y-2">
                   <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">结果分析</label>
-                  <div class="text-[11px] text-apple-secondary-text leading-relaxed bg-white/50 dark:bg-white/5 p-3 rounded-apple border border-apple-border italic">
+                  <div class="text-[11px] text-apple-secondary-text leading-relaxed bg-apple-background/24 p-3 rounded-apple italic shadow-[inset_0_0_0_1px_rgba(71,85,105,0.08)]">
                     "{{ currentTask.result.analysis }}"
                   </div>
                 </div>
 
                 <div class="space-y-3">
                   <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">确认入库</label>
-                  <div class="rounded-apple border border-apple-border bg-white/50 dark:bg-white/5 p-4 space-y-3">
+                  <div class="rounded-apple bg-apple-background/24 p-4 space-y-3 shadow-[inset_0_0_0_1px_rgba(71,85,105,0.08)]">
                     <input
                       v-model="libraryEntryName"
                       type="text"
@@ -637,9 +637,9 @@ onUnmounted(() => {
             </div>
 
             <!-- Terminal Log for Success State -->
-            <div v-if="currentLogs" class="border-t border-apple-border bg-black/95">
-              <div class="flex items-center justify-between px-4 py-2 bg-white/5 border-b border-white/5">
-                <span class="text-[9px] font-bold text-white/30 uppercase tracking-widest">Execution Logs</span>
+            <div v-if="currentLogs" class="border-t border-apple-border/50 bg-[linear-gradient(180deg,rgba(5,9,18,0.98),rgba(8,13,24,0.96))]">
+              <div class="flex items-center justify-between px-4 py-2 bg-white/[0.03] border-b border-apple-border/50">
+                <span class="text-[9px] font-bold text-white/30 uppercase tracking-widest">执行日志</span>
                 <Terminal :size="10" class="text-white/30" />
               </div>
               <div class="p-3 max-h-32 overflow-y-auto font-mono text-[10px] leading-tight">
@@ -658,9 +658,9 @@ onUnmounted(() => {
           </template>
 
           <template v-else-if="currentTask?.status === 'running'">
-            <div class="h-full min-h-[620px] flex flex-col bg-[#0c0c0c] rounded-apple overflow-hidden shadow-2xl border border-white/10">
+            <div class="h-full min-h-[620px] flex flex-col rounded-apple overflow-hidden border border-apple-border/40 bg-[linear-gradient(180deg,rgba(5,9,18,0.98),rgba(8,13,24,0.96))] shadow-[0_24px_56px_-40px_rgba(2,6,23,0.82)]">
               <!-- Terminal Header -->
-              <div class="flex items-center justify-between px-4 py-2.5 bg-[#1e1e1e] border-b border-white/5">
+              <div class="flex items-center justify-between px-4 py-2.5 bg-[rgba(17,24,39,0.72)] border-b border-apple-border/50">
                 <div class="flex items-center gap-4">
                   <div class="flex gap-2">
                     <div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
@@ -674,7 +674,7 @@ onUnmounted(() => {
                 </div>
                 <div class="flex items-center gap-3">
                   <span class="text-[10px] font-mono text-emerald-500/80 animate-pulse">● EXECUTING</span>
-                  <div class="w-px h-3 bg-white/10"></div>
+                  <div class="w-px h-3 bg-apple-border"></div>
                   <Loader2 class="animate-spin text-white/20" :size="12" />
                 </div>
               </div>
@@ -710,28 +710,28 @@ onUnmounted(() => {
               </div>
 
               <!-- Terminal Footer -->
-              <div class="px-6 py-3 bg-white/5 border-t border-white/5 flex items-center justify-between">
+              <div class="px-6 py-3 bg-white/[0.03] border-t border-apple-border/50 flex items-center justify-between">
                 <div class="flex items-center gap-6">
                   <div class="flex flex-col">
-                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">Engine</span>
+                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">引擎</span>
                     <span class="text-[11px] text-white/70 font-mono">{{ currentTask.provider }}</span>
                   </div>
                   <div class="flex flex-col">
-                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">Status</span>
-                    <span class="text-[11px] text-amber-500 font-mono">Running</span>
+                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">状态</span>
+                    <span class="text-[11px] text-amber-300 font-mono">运行中</span>
                   </div>
                   <div class="flex flex-col">
-                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">Uptime</span>
-                    <span class="text-[11px] text-white/70 font-mono">Real-time Polling (3s)</span>
+                    <span class="text-[9px] uppercase tracking-widest text-white/30 font-bold">轮询</span>
+                    <span class="text-[11px] text-white/70 font-mono">每 3 秒同步一次</span>
                   </div>
                 </div>
                 <a
                   v-if="currentTask.result?.resultPageUrl"
                   :href="currentTask.result.resultPageUrl"
                   target="_blank"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded bg-white/5 border border-white/10 text-[10px] text-white/50 font-bold uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded bg-white/[0.035] text-[10px] text-white/50 font-bold uppercase tracking-widest hover:bg-white/[0.06] hover:text-white transition-all shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)]"
                 >
-                  External Monitor
+                  打开结果页
                   <Sparkles :size="10" />
                 </a>
               </div>
@@ -784,11 +784,11 @@ onUnmounted(() => {
             <div
               v-for="item in readinessItems"
               :key="item.label"
-              class="rounded-apple border border-apple-border bg-apple-background/35 px-4 py-3"
+              class="rounded-apple bg-apple-background/28 px-4 py-3 shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]"
             >
               <div class="flex items-center gap-3">
                 <CheckCircle2 v-if="item.done" class="text-emerald-500" :size="16" />
-                <div v-else class="w-4 h-4 rounded-full border-2 border-apple-border"></div>
+                <div v-else class="w-4 h-4 rounded-full shadow-[inset_0_0_0_2px_rgba(71,85,105,0.18)]"></div>
                 <div>
                   <p class="text-xs font-semibold text-apple-text">{{ item.label }}</p>
                   <p class="text-[11px] text-apple-secondary-text">{{ item.hint }}</p>
@@ -797,7 +797,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="rounded-apple border border-apple-border bg-white/60 dark:bg-white/5 px-4 py-3 text-[11px] leading-relaxed text-apple-secondary-text">
+          <div class="rounded-apple bg-apple-background/28 px-4 py-3 text-[11px] leading-relaxed text-apple-secondary-text shadow-[inset_0_0_0_1px_rgba(71,85,105,0.08)]">
             <p><span class="font-bold text-apple-text">当前引擎：</span>{{ providerMeta.providerLabel }}</p>
             <p class="mt-1"><span class="font-bold text-apple-text">当前任务：</span>{{ activeTaskSummary }}</p>
             <p class="mt-1"><span class="font-bold text-apple-text">任务数：</span>{{ providerTasks.length }}</p>
@@ -829,7 +829,7 @@ onUnmounted(() => {
               v-for="task in providerTasks.slice(0, 15)"
               :key="task.id"
               type="button"
-              class="p-3 rounded-apple bg-apple-background dark:bg-white/5 border border-apple-border flex items-center justify-between w-full text-left hover:border-apple-blue/20 transition-all"
+              class="p-3 rounded-apple bg-apple-background/24 flex items-center justify-between w-full text-left hover:bg-apple-background/36 transition-all shadow-[inset_0_0_0_1px_rgba(71,85,105,0.08)] hover:shadow-[inset_0_0_0_1px_rgba(56,189,248,0.14)]"
               :class="currentTask?.id === task.id ? 'border-apple-blue/40' : ''"
               @click="selectTask(task.id)"
             >
@@ -846,7 +846,7 @@ onUnmounted(() => {
                 </div>
               </div>
               <span class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-tighter">
-                {{ task.status === 'running' ? 'Running' : task.status === 'success' ? 'Done' : 'Error' }}
+                {{ task.status === 'running' ? '运行中' : task.status === 'success' ? '已完成' : '异常' }}
               </span>
             </button>
 
@@ -856,9 +856,9 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="apple-card p-6 bg-gradient-to-br from-purple-500/5 to-transparent border-purple-500/10">
+          <div class="apple-card p-6 bg-[linear-gradient(180deg,rgba(9,14,25,0.42),rgba(9,14,25,0.18))]">
           <div class="flex items-center gap-3 mb-4">
-            <div class="w-8 h-8 rounded-apple bg-purple-500/10 text-purple-500 flex items-center justify-center">
+            <div class="w-8 h-8 rounded-apple bg-violet-400/10 text-violet-300 flex items-center justify-center">
               <FileText :size="16" />
             </div>
             <h3 class="text-sm font-bold text-apple-text">工作台说明</h3>

@@ -1,4 +1,13 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-<rect width="32" height="32" fill="#0A0B0D"/>
-<path d="M26.6677 23.7149H8.38057V20.6496H5.33301V8.38159H26.6677V23.7149ZM8.38057 20.6496H23.6201V11.4482H8.38057V20.6496ZM16.0011 16.0021L13.8461 18.1705L11.6913 16.0021L13.8461 13.8337L16.0011 16.0021ZM22.0963 16.0008L19.9414 18.1691L17.7865 16.0008L19.9414 13.8324L22.0963 16.0008Z" fill="#32F08C"/>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="4" y="4" width="56" height="56" rx="18" fill="url(#brand-bg)"/>
+<path d="M23 18.5C23 16.0147 25.0147 14 27.5 14H42.5C44.9853 14 47 16.0147 47 18.5C47 20.9853 44.9853 23 42.5 23H31V29H38C40.4853 29 42.5 31.0147 42.5 33.5C42.5 35.9853 40.4853 38 38 38H31V46C31 48.7614 28.7614 51 26 51C23.2386 51 21 48.7614 21 46V20.5C21 19.3954 21.8954 18.5 23 18.5Z" fill="#F8FAFC"/>
+<circle cx="42.5" cy="18.5" r="4.5" fill="#5EEAD4"/>
+<circle cx="38" cy="33.5" r="4.5" fill="#38BDF8"/>
+<circle cx="26" cy="46" r="5" fill="#5EEAD4"/>
+<defs>
+<linearGradient id="brand-bg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+<stop stop-color="#0F172A"/>
+<stop offset="1" stop-color="#111827"/>
+</linearGradient>
+</defs>
 </svg>

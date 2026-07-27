@@ -3,7 +3,7 @@ import { getLatestImportTask, getImportTask, importAccessions, listEnzymes, dele
 import type { EnzymeEntry, ImportTask } from '@/types'
 
 export function useNcbiImport() {
-  const taskName = ref('ncbi_batch_bootstrap_001')
+  const taskName = ref('NCBI酶库批量导入')
   const accessionInput = ref('WP_010248927.1\nNP_001092.1')
   const moleculeType = ref<'protein' | 'RNA'>((localStorage.getItem('ncbi_import_molecule_type') as 'protein' | 'RNA') || 'protein')
   const ncbiEmail = ref(localStorage.getItem('ncbi_email') || '')

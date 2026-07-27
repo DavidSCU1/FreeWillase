@@ -52,7 +52,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       librarySourceType: 'PREDICTED',
       libraryTitle: '预测成果库',
-      librarySubtitle: '展示你确认并正式入库的所有预测结果（包括 MiniFold, ESMFold, trRosettaRNA 等），独立于 Accession 导入条目。',
+      librarySubtitle: '展示你确认并正式入库的所有预测结果（包括 MiniFold、NVIDIA ESMFold、trRosettaRNA 等），独立于 Accession 导入条目。',
     },
   },
   {

@@ -13,7 +13,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="p-6 rounded-apple bg-apple-background/50 border border-apple-border space-y-4">
+  <div class="p-6 rounded-apple bg-apple-background/32 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] space-y-4">
     <div class="flex items-center gap-2">
       <Database :size="14" class="text-apple-blue" />
       <h3 class="text-xs font-bold text-apple-text">NCBI 凭据 (可选 - 用于提高请求频率上限)</h3>

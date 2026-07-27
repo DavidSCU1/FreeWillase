@@ -1,4 +1,4 @@
-import type { EnzymeAnnotation, EnzymeAnnotationType, EnzymeEntry, ImportTask, LiteratureRecord } from '@/types'
+import type { EnzymeAnnotation, EnzymeAnnotationType, EnzymeEntry, ImportTask, LiteratureRecord, LiteratureScanStatus } from '@/types'
 
 interface ImportRequest {
   taskName: string
@@ -145,6 +145,12 @@ export function getEnzymeLiteratures(enzymeId: number) {
   return request<LiteratureRecord[]>(`/api/enzymes/${enzymeId}/literatures`)
 }
 
+export function deleteEnzymeLiteratureRelation(enzymeId: number, relationId: number) {
+  return request<void>(`/api/enzymes/${enzymeId}/literatures/relations/${relationId}`, {
+    method: 'DELETE',
+  })
+}
+
 export function getEnzymeStructure(enzymeId: number) {
   return request<string>(`/api/enzymes/${enzymeId}/structure`)
 }
@@ -264,6 +270,47 @@ export function scanLiteratures(payload: MatchRequest) {
   })
 }
 
+export async function getLiteratureScanStatus() {
+  const token = localStorage.getItem('token')
+  const response = await fetch('/api/literatures/scan-status', {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+
+  if (response.status === 401 || response.status === 403) {
+    localStorage.removeItem('token')
+    window.location.href = '/login'
+    throw new Error(response.status === 401 ? '未授权，请重新登录' : '登录状态已失效或无权访问，请重新登录')
+  }
+
+  // Older backend instances may not expose scan-status yet.
+  // Keep the literature page usable instead of surfacing a hard error on entry.
+  if (response.status === 404 || response.status === 204) {
+    return null
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => null)
+    let message = '获取文献扫描状态失败'
+    try {
+      if (text) {
+        const body = JSON.parse(text)
+        message = body?.message ?? body?.error ?? message
+      }
+    } catch (e) {
+      message = text || message
+    }
+    throw new Error(text?.trim() || message)
+  }
+
+  const text = await response.text()
+  if (!text.trim()) {
+    return null
+  }
+  return JSON.parse(text) as LiteratureScanStatus
+}
+
 export function matchAllLiteratures(data: { ncbiEmail?: string, ncbiApiKey?: string }) {
   return request<void>('/api/literatures/match-all', {
     method: 'POST',
@@ -277,7 +324,7 @@ export function downloadLiteratureRelation(relationId: number) {
   })
 }
 
-export async function downloadLiteratureAttachment(literatureId: number) {
+async function fetchLiteratureAttachment(literatureId: number) {
   const token = localStorage.getItem('token')
   const response = await fetch(`/api/literatures/${literatureId}/attachment`, {
     headers: {
@@ -299,7 +346,11 @@ export async function downloadLiteratureAttachment(literatureId: number) {
   const fileNameMatch = disposition.match(/filename="?(.*?)"?$/i)
   const fileName = fileNameMatch?.[1] || `literature-${literatureId}.xml`
   const blob = await response.blob()
-  return { blob, fileName }
+  return { blob, fileName, contentType: response.headers.get('Content-Type') || blob.type || '' }
+}
+
+export function downloadLiteratureAttachment(literatureId: number) {
+  return fetchLiteratureAttachment(literatureId)
 }
 
 export function getDashboardStats() {

@@ -91,6 +91,23 @@ export interface LiteratureRecord {
   savedToLibrary?: boolean
 }
 
+export interface LiteratureScanStatus {
+  status: 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  message: string
+  scope: 'ALL' | 'PARTIAL'
+  apiKeyEnabled: boolean
+  totalEnzymes: number
+  processedEnzymes: number
+  discoveredCandidates: number
+  failedEnzymes: number
+  currentEnzymeId?: number
+  currentAccession?: string
+  currentEnzymeName?: string
+  startedAt?: string
+  finishedAt?: string
+  lastHeartbeatAt?: string
+}
+
 export type PredictionProvider = 'nvidia' | 'minifold' | 'trrosettarna'
 
 export type MoleculeType = 'protein' | 'RNA' | 'DNA'

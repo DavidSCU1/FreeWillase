@@ -1,14 +1,30 @@
 import { computed, ref } from 'vue'
-import { downloadLiteratureRelation, getEnzymeLiteratures, importEnzymeLiteratureFile, listAllLiteratures, scanLiteratures, uploadEnzymeLiteratureFile } from '@/utils/api'
-import type { LiteratureRecord } from '@/types'
+import { deleteEnzymeLiteratureRelation, downloadLiteratureRelation, getEnzymeLiteratures, getLiteratureScanStatus, importEnzymeLiteratureFile, listAllLiteratures, scanLiteratures, uploadEnzymeLiteratureFile } from '@/utils/api'
+import type { LiteratureRecord, LiteratureScanStatus } from '@/types'
+
+function createIdleScanStatus(): LiteratureScanStatus {
+  return {
+    status: 'IDLE',
+    message: '等待启动文献扫描',
+    scope: 'ALL',
+    apiKeyEnabled: false,
+    totalEnzymes: 0,
+    processedEnzymes: 0,
+    discoveredCandidates: 0,
+    failedEnzymes: 0,
+  }
+}
 
 export function useLiterature() {
   const literatures = ref<LiteratureRecord[]>([])
+  const scanStatus = ref<LiteratureScanStatus | null>(createIdleScanStatus())
   const enzymeLiteratures = ref<LiteratureRecord[]>([])
   const listLoading = ref(false)
   const enzymeLoading = ref(false)
   const scanLoading = ref(false)
+  const scanStatusLoading = ref(false)
   const downloadingRelationIds = ref<number[]>([])
+  const deletingRelationIds = ref<number[]>([])
   const importingEnzymeId = ref<number | null>(null)
   const error = ref<string | null>(null)
 
@@ -26,6 +42,18 @@ export function useLiterature() {
       console.error(err)
     } finally {
       listLoading.value = false
+    }
+  }
+
+  const fetchScanStatus = async () => {
+    scanStatusLoading.value = true
+    try {
+      scanStatus.value = await getLiteratureScanStatus() ?? createIdleScanStatus()
+    } catch (err) {
+      console.error('获取文献扫描状态失败', err)
+      scanStatus.value = createIdleScanStatus()
+    } finally {
+      scanStatusLoading.value = false
     }
   }
 
@@ -112,22 +140,41 @@ export function useLiterature() {
     }
   }
 
+  const removeEnzymeLiterature = async (enzymeId: number, relationId: number) => {
+    try {
+      deletingRelationIds.value = [...deletingRelationIds.value, relationId]
+      await deleteEnzymeLiteratureRelation(enzymeId, relationId)
+      enzymeLiteratures.value = enzymeLiteratures.value.filter((item) => item.relationId !== relationId)
+      literatures.value = literatures.value.filter((item) => !(item.enzymeId === enzymeId && item.relationId === relationId))
+    } catch (err) {
+      console.error('删除关联文献失败', err)
+      throw err
+    } finally {
+      deletingRelationIds.value = deletingRelationIds.value.filter((id) => id !== relationId)
+    }
+  }
+
   return {
     literatures,
+    scanStatus,
     enzymeLiteratures,
     loading,
     listLoading,
     enzymeLoading,
     scanLoading,
+    scanStatusLoading,
     downloadingRelationIds,
+    deletingRelationIds,
     importingEnzymeId,
     error,
     ncbiEmail,
     ncbiApiKey,
     fetchAllLiteratures,
+    fetchScanStatus,
     fetchEnzymeLiteratures,
     scan,
     downloadLiterature,
     importLocalLiterature,
+    removeEnzymeLiterature,
   }
 }

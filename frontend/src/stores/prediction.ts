@@ -42,7 +42,7 @@ export const usePredictionStore = defineStore('prediction', () => {
   const baseUrl = ref('')
   const moleculeType = ref<MoleculeType>('protein')
   const model = ref('')
-  const name = ref('Sample')
+  const name = ref('候选酶结构任务')
   const submitMode = ref<'single' | 'batch'>('single')
   const sequence = ref('')
   const taskLogs = ref<Record<string, string>>({})
@@ -190,7 +190,7 @@ export const usePredictionStore = defineStore('prediction', () => {
     try {
       const records = submitMode.value === 'batch'
         ? batchRecords
-        : [{ name: name.value.trim() || 'Unnamed', sequence: preparedSequence }]
+        : [{ name: name.value.trim() || '未命名预测任务', sequence: preparedSequence }]
 
       const entries = records.map(record => ({
         record,
@@ -211,7 +211,7 @@ export const usePredictionStore = defineStore('prediction', () => {
 
       // Initial terminal log
       entries.forEach(entry => {
-        taskLogs.value[entry.task.id] = `root@freewillase:~# trrosettarna-predict --name "${entry.task.name}"\n[SYSTEM] Preparing request...`
+        taskLogs.value[entry.task.id] = `root@freewillase:~# freewillase-predict --provider "${entry.task.provider}" --name "${entry.task.name}"\n[SYSTEM] Preparing request...`
       })
 
       for (const entry of entries) {

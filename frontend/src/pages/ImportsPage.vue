@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Database, Upload, FileText, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-vue-next'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EnzymeLibraryTable from '@/components/EnzymeLibraryTable.vue'
 import ImportTaskCard from '@/components/ImportTaskCard.vue'
 import NcbiCredentialsForm from '@/components/NcbiCredentialsForm.vue'
@@ -22,6 +23,30 @@ const {
   submitImport,
 } = useNcbiImport()
 
+const pendingDeleteId = ref<number | null>(null)
+const deleteLoading = ref(false)
+const pendingDeleteEntry = computed(() => enzymes.value.find((item) => item.id === pendingDeleteId.value) ?? null)
+
+function openDeleteDialog(id: number) {
+  pendingDeleteId.value = id
+}
+
+function closeDeleteDialog() {
+  if (deleteLoading.value) return
+  pendingDeleteId.value = null
+}
+
+async function confirmDelete() {
+  if (pendingDeleteId.value == null) return
+  deleteLoading.value = true
+  try {
+    await removeEnzyme(pendingDeleteId.value)
+    pendingDeleteId.value = null
+  } finally {
+    deleteLoading.value = false
+  }
+}
+
 onMounted(async () => {
   try {
     await refreshAll()
@@ -32,14 +57,14 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-10 pb-20">
+  <div class="space-y-10 pb-20 motion-stagger">
     <!-- Header -->
     <div class="space-y-1">
       <h1 class="text-3xl font-bold tracking-tight text-apple-text">NCBI 导入中心</h1>
-      <p class="text-apple-secondary-text text-sm">在这里剥夺 NCBI 数据库的“自由意志”，批量捕捉每一只酶。</p>
+      <p class="text-apple-secondary-text text-sm">批量导入 NCBI accession，建立本地酶库并补齐基础元数据。</p>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-8 items-start">
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-8 items-start motion-stagger">
       <!-- Main Import Area -->
       <div class="apple-card p-8 space-y-8">
         <div class="flex items-center justify-between">
@@ -49,7 +74,7 @@ onMounted(async () => {
             </div>
             <div>
               <h2 class="text-lg font-bold text-apple-text">批量 Accession 录入</h2>
-              <p class="text-xs text-apple-secondary-text">支持 Protein Accession 与 Nucleotide Accession 两种导入模式</p>
+              <p class="text-xs text-apple-secondary-text">支持蛋白 accession 与核酸 accession 两种导入模式。</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -79,7 +104,7 @@ onMounted(async () => {
                   class="flex-1 py-3 rounded-apple text-xs font-bold transition-all"
                   :class="moleculeType === 'protein'
                     ? 'bg-apple-blue text-white shadow-lg shadow-apple-blue/20'
-                    : 'bg-apple-background dark:bg-white/5 border border-apple-border text-apple-secondary-text hover:text-apple-text'"
+                    : 'apple-soft-panel text-apple-secondary-text hover:text-apple-text'"
                   @click="moleculeType = 'protein'"
                 >
                   蛋白质酶
@@ -89,7 +114,7 @@ onMounted(async () => {
                   class="flex-1 py-3 rounded-apple text-xs font-bold transition-all"
                   :class="moleculeType === 'RNA'
                     ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
-                    : 'bg-apple-background dark:bg-white/5 border border-apple-border text-apple-secondary-text hover:text-apple-text'"
+                    : 'apple-soft-panel text-apple-secondary-text hover:text-apple-text'"
                   @click="moleculeType = 'RNA'"
                 >
                   核酶 / RNA 酶
@@ -126,7 +151,7 @@ onMounted(async () => {
             ></textarea>
           </div>
 
-          <div class="flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t border-apple-border">
+          <div class="flex flex-col md:flex-row items-center justify-between gap-4 pt-4 border-t border-black/20">
             <div class="flex items-center gap-3 text-xs text-apple-secondary-text">
               <div class="w-2 h-2 rounded-full bg-apple-green animate-pulse"></div>
               <span>NCBI E-utilities 已连接 (API_KEY 模式)</span>
@@ -146,7 +171,7 @@ onMounted(async () => {
                   处理中...
                 </template>
                 <template v-else>
-                  发射捕捉网 (异步导入)
+                  提交异步导入
                   <ArrowRight :size="16" />
                 </template>
               </button>
@@ -166,7 +191,7 @@ onMounted(async () => {
               </div>
               <div>
                 <p class="text-xs font-bold text-apple-text">异步处理</p>
-                <p class="text-[10px] text-apple-secondary-text mt-1 leading-relaxed">系统将后台启动 NCBI 数据抓取任务，您可以在工作台实时查看进度。</p>
+                <p class="text-[10px] text-apple-secondary-text mt-1 leading-relaxed">系统会在后台执行 accession 抓取与解析，你可以继续在工作台查看实时进度。</p>
               </div>
             </li>
             <li class="flex gap-3">
@@ -175,7 +200,7 @@ onMounted(async () => {
               </div>
               <div>
                 <p class="text-xs font-bold text-apple-text">自动补全</p>
-                <p class="text-[10px] text-apple-secondary-text mt-1 leading-relaxed">我们将为您自动拉取蛋白名称、序列、物种 Tax ID、相关基因等元数据。</p>
+                <p class="text-[10px] text-apple-secondary-text mt-1 leading-relaxed">系统会自动补全名称、序列、物种信息及可用的结构关联数据。</p>
               </div>
             </li>
             <li class="flex gap-3">
@@ -194,6 +219,17 @@ onMounted(async () => {
       </div>
     </div>
 
-    <EnzymeLibraryTable :enzymes="enzymes" @delete="removeEnzyme" />
+    <EnzymeLibraryTable :enzymes="enzymes" @delete="openDeleteDialog" />
+
+    <ConfirmDialog
+      :open="pendingDeleteId !== null"
+      title="删除酶条目"
+      :message="`确定要从本地酶库中移除“${pendingDeleteEntry?.proteinName || pendingDeleteEntry?.accession || '该条目'}”吗？删除后将无法恢复。`"
+      confirm-text="确认删除"
+      :loading="deleteLoading"
+      danger
+      @cancel="closeDeleteDialog"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

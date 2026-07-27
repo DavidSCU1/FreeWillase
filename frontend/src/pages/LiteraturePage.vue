@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  Activity,
   CheckCircle2,
   Database,
   Download,
@@ -18,12 +19,13 @@ import { useNcbiImport } from '@/composables/useNcbiImport'
 const route = useRoute()
 const {
   literatures,
-  loading,
   scanLoading,
+  scanStatus,
   downloadingRelationIds,
   ncbiEmail,
   ncbiApiKey,
   fetchAllLiteratures,
+  fetchScanStatus,
   scan,
   downloadLiterature,
 } = useLiterature()
@@ -31,7 +33,10 @@ const { enzymes, refreshEnzymeLibrary } = useNcbiImport()
 
 const scanScope = ref<'all' | 'selected'>('all')
 const selectedEnzymeIds = ref<number[]>([])
+const clockNow = ref(Date.now())
 let pollInterval: number | null = null
+let clockInterval: number | null = null
+let pollingGraceUntil = 0
 
 const confidenceConfig = {
   STRONG: { bg: 'bg-apple-green/10 text-apple-green', label: '强关联' },
@@ -40,10 +45,56 @@ const confidenceConfig = {
 }
 
 const selectedCount = computed(() => selectedEnzymeIds.value.length)
+const isScanRunning = computed(() => scanStatus.value?.status === 'RUNNING')
+const progressPercentage = computed(() => {
+  const total = scanStatus.value?.totalEnzymes || 0
+  if (!total) return isScanRunning.value ? 12 : 0
+  return Math.min(100, Math.max(Math.round(((scanStatus.value?.processedEnzymes || 0) / total) * 100), isScanRunning.value ? 12 : 0))
+})
+const elapsedSeconds = computed(() => {
+  if (!scanStatus.value?.startedAt) return 0
+  const started = new Date(scanStatus.value.startedAt).getTime()
+  const ended = scanStatus.value.finishedAt
+    ? new Date(scanStatus.value.finishedAt).getTime()
+    : clockNow.value
+  return Math.max(0, Math.round((ended - started) / 1000))
+})
+const statusBadge = computed(() => {
+  switch (scanStatus.value?.status) {
+    case 'RUNNING':
+      return { text: '运行中', className: 'bg-apple-blue/10 text-apple-blue' }
+    case 'COMPLETED':
+      return { text: '已完成', className: 'bg-apple-green/10 text-apple-green' }
+    case 'FAILED':
+      return { text: '异常结束', className: 'bg-red-500/10 text-red-500' }
+    default:
+      return { text: '待启动', className: 'apple-soft-strip text-apple-secondary-text' }
+  }
+})
+const liveHint = computed(() => {
+  if (!scanStatus.value) return ''
+  if (isScanRunning.value) {
+    return `已处理 ${scanStatus.value.processedEnzymes} / ${scanStatus.value.totalEnzymes} 个酶，累计发现 ${scanStatus.value.discoveredCandidates} 条候选文献`
+  }
+  return scanStatus.value.message
+})
 
 const orderedLiteratures = computed(() =>
   [...literatures.value].sort((a, b) => Number(Boolean(b.savedToLibrary)) - Number(Boolean(a.savedToLibrary))),
 )
+
+const formatDuration = (seconds: number) => {
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}分 ${secs.toString().padStart(2, '0')}秒`
+}
+
+const formatTimestamp = (value?: string) => {
+  if (!value) return '等待心跳'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '等待心跳'
+  return date.toLocaleTimeString('zh-CN', { hour12: false })
+}
 
 const toggleEnzyme = (enzymeId: number) => {
   selectedEnzymeIds.value = selectedEnzymeIds.value.includes(enzymeId)
@@ -59,11 +110,39 @@ const clearSelectedEnzymes = () => {
   selectedEnzymeIds.value = []
 }
 
-const startPolling = () => {
+const startClock = () => {
+  if (clockInterval) return
+  clockInterval = window.setInterval(() => {
+    clockNow.value = Date.now()
+  }, 1000)
+}
+
+const stopClock = () => {
+  if (clockInterval) {
+    clearInterval(clockInterval)
+    clockInterval = null
+  }
+}
+
+const pollSnapshot = async () => {
+  await Promise.all([fetchScanStatus(), fetchAllLiteratures()])
+  clockNow.value = Date.now()
+  if (isScanRunning.value) {
+    startClock()
+    return
+  }
+  if (Date.now() >= pollingGraceUntil && !scanLoading.value) {
+    stopPolling()
+  }
+}
+
+const startPolling = (graceMs = 0) => {
+  pollingGraceUntil = Math.max(pollingGraceUntil, Date.now() + graceMs)
   if (pollInterval) return
+  pollSnapshot()
   pollInterval = window.setInterval(() => {
-    fetchAllLiteratures()
-  }, 5000)
+    pollSnapshot()
+  }, 2500)
 }
 
 const stopPolling = () => {
@@ -71,6 +150,7 @@ const stopPolling = () => {
     clearInterval(pollInterval)
     pollInterval = null
   }
+  stopClock()
 }
 
 const handleScan = async () => {
@@ -78,9 +158,12 @@ const handleScan = async () => {
     window.alert('请先选择要扫描的酶条目')
     return
   }
+  startPolling(10000)
   await scan(scanScope.value === 'selected' ? selectedEnzymeIds.value : undefined)
-  startPolling()
-  window.setTimeout(stopPolling, 120000)
+  await pollSnapshot()
+  if (isScanRunning.value) {
+    startPolling(120000)
+  }
 }
 
 const handleDownload = async (relationId?: number) => {
@@ -89,11 +172,14 @@ const handleDownload = async (relationId?: number) => {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchAllLiteratures(), refreshEnzymeLibrary()])
+  await Promise.all([fetchAllLiteratures(), fetchScanStatus(), refreshEnzymeLibrary()])
   const enzymeId = Number(route.query.enzymeId)
   if (enzymeId) {
     scanScope.value = 'selected'
     selectedEnzymeIds.value = [enzymeId]
+  }
+  if (scanStatus.value?.status === 'RUNNING') {
+    startPolling(120000)
   }
 })
 
@@ -104,7 +190,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="max-w-6xl mx-auto space-y-8 pb-20">
-    <div class="apple-card p-10 bg-gradient-to-br from-apple-blue/5 via-transparent to-apple-green/5">
+    <div class="apple-card p-10 bg-[linear-gradient(180deg,rgba(7,11,23,0.42),rgba(7,11,23,0.16))]">
       <div class="flex flex-col md:flex-row items-center justify-between gap-8">
         <div class="space-y-4 text-center md:text-left">
           <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-apple-blue/10 text-apple-blue text-[10px] font-bold uppercase tracking-widest">
@@ -120,24 +206,27 @@ onBeforeUnmount(() => {
         <div class="flex flex-col gap-4 w-full md:w-auto">
           <button 
             @click="handleScan"
-            :disabled="loading"
+            :disabled="scanLoading || isScanRunning"
             class="apple-button-primary !py-4 !px-8 flex items-center justify-center gap-3 text-sm shadow-apple-blue disabled:opacity-50"
           >
-            <Loader2 v-if="loading" :size="20" class="animate-spin" />
+            <Loader2 v-if="scanLoading || isScanRunning" :size="20" class="animate-spin" />
             <Search v-else :size="20" />
-            {{ loading ? '正在扫描 PubMed...' : scanScope === 'all' ? '开始全库扫描' : '开始部分扫描' }}
+            {{ scanLoading ? '正在提交扫描任务...' : isScanRunning ? 'PubMed 扫描进行中...' : scanScope === 'all' ? '开始全库扫描' : '开始部分扫描' }}
           </button>
           
           <div class="flex items-center justify-center md:justify-start gap-2 text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest">
             <Database :size="12" />
             {{ ncbiApiKey ? 'API KEY 已激活 (10次/秒)' : '匿名模式 (3次/秒)' }}
           </div>
+          <p v-if="scanLoading || isScanRunning" class="text-xs text-apple-secondary-text text-center md:text-left">
+            {{ liveHint }}
+          </p>
         </div>
       </div>
     </div>
 
     <div class="grid grid-cols-1 gap-8">
-      <div class="apple-card p-6 bg-white/50 dark:bg-black/20">
+      <div class="apple-card p-6">
         <NcbiCredentialsForm 
           v-model:email="ncbiEmail"
           v-model:api-key="ncbiApiKey"
@@ -180,8 +269,8 @@ onBeforeUnmount(() => {
               v-for="enzyme in enzymes"
               :key="enzyme.id"
               @click="toggleEnzyme(enzyme.id)"
-              class="text-left p-4 rounded-apple border transition-all"
-              :class="selectedEnzymeIds.includes(enzyme.id) ? 'border-apple-blue bg-apple-blue/5' : 'border-apple-border bg-apple-background dark:bg-white/5'"
+              class="text-left p-4 rounded-apple transition-all"
+              :class="selectedEnzymeIds.includes(enzyme.id) ? 'bg-apple-blue/[0.08] shadow-[inset_0_0_0_1px_rgba(56,189,248,0.16),0_16px_36px_-30px_rgba(56,189,248,0.2)]' : 'apple-soft-panel'"
             >
               <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-bold text-apple-blue">{{ enzyme.accession }}</span>
@@ -190,6 +279,88 @@ onBeforeUnmount(() => {
               <p class="mt-2 text-sm font-semibold text-apple-text line-clamp-2">{{ enzyme.proteinName }}</p>
               <p class="mt-1 text-[11px] text-apple-secondary-text truncate">{{ enzyme.organismName }}</p>
             </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="scanStatus && (scanStatus.status !== 'IDLE' || scanLoading)"
+        class="apple-card p-6 bg-[linear-gradient(180deg,rgba(7,11,23,0.42),rgba(7,11,23,0.18))]"
+      >
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div class="space-y-2">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-apple bg-apple-blue/10 text-apple-blue flex items-center justify-center">
+                <Activity :size="18" :class="isScanRunning ? 'animate-pulse' : ''" />
+              </div>
+              <div>
+                <h2 class="text-lg font-bold text-apple-text">运行观测台</h2>
+                <p class="text-xs text-apple-secondary-text">让文献关联过程不再“黑箱”执行。</p>
+              </div>
+            </div>
+            <p class="text-sm text-apple-text font-semibold">
+              {{ scanStatus.message }}
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest" :class="statusBadge.className">
+              {{ statusBadge.text }}
+            </span>
+            <span class="apple-soft-strip px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">
+              {{ scanStatus.scope === 'PARTIAL' ? '部分扫描' : '全库扫描' }}
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-6 grid grid-cols-2 xl:grid-cols-4 gap-4">
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">扫描进度</p>
+            <p class="mt-2 text-2xl font-bold text-apple-text">{{ scanStatus.processedEnzymes }} / {{ scanStatus.totalEnzymes }}</p>
+          </div>
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">候选文献</p>
+            <p class="mt-2 text-2xl font-bold text-apple-blue">{{ scanStatus.discoveredCandidates }}</p>
+          </div>
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">已运行</p>
+            <p class="mt-2 text-2xl font-bold text-apple-text">{{ formatDuration(elapsedSeconds) }}</p>
+          </div>
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">异常条目</p>
+            <p class="mt-2 text-2xl font-bold" :class="scanStatus.failedEnzymes ? 'text-red-500' : 'text-apple-text'">{{ scanStatus.failedEnzymes }}</p>
+          </div>
+        </div>
+
+        <div class="mt-5">
+          <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text mb-2">
+            <span>实时进度条</span>
+            <span>{{ progressPercentage }}%</span>
+          </div>
+          <div class="h-2 rounded-full bg-apple-blue/8 overflow-hidden">
+            <div
+              class="h-full rounded-full bg-gradient-to-r from-apple-blue to-purple-500 transition-all duration-700"
+              :class="isScanRunning ? 'shadow-[0_0_14px_rgba(0,113,227,0.35)]' : ''"
+              :style="{ width: `${progressPercentage}%` }"
+            ></div>
+          </div>
+        </div>
+
+        <div class="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">当前目标</p>
+            <p class="mt-2 font-semibold text-apple-text">{{ scanStatus.currentAccession || '等待分配任务' }}</p>
+            <p class="mt-1 text-apple-secondary-text line-clamp-2">{{ scanStatus.currentEnzymeName || '扫描启动后会在这里显示当前酶条目。' }}</p>
+          </div>
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">扫描模式</p>
+            <p class="mt-2 font-semibold text-apple-text">{{ scanStatus.apiKeyEnabled ? 'API Key 加速模式' : '匿名模式' }}</p>
+            <p class="mt-1 text-apple-secondary-text">{{ scanStatus.apiKeyEnabled ? '更高请求频率，反馈更快。' : '限速较低，但仍会持续产出候选。' }}</p>
+          </div>
+          <div class="apple-soft-panel rounded-apple p-4">
+            <p class="text-[10px] font-bold uppercase tracking-widest text-apple-secondary-text">最近心跳</p>
+            <p class="mt-2 font-semibold text-apple-text">{{ formatTimestamp(scanStatus.lastHeartbeatAt) }}</p>
+            <p class="mt-1 text-apple-secondary-text">{{ scanStatus.finishedAt ? '本轮扫描已落盘完成。' : '页面会持续轮询，直到扫描结束。' }}</p>
           </div>
         </div>
       </div>
@@ -205,7 +376,7 @@ onBeforeUnmount(() => {
           </h2>
         </div>
 
-        <div v-if="loading && !literatures.length" class="apple-card p-20 flex flex-col items-center justify-center">
+        <div v-if="(scanLoading || isScanRunning) && !literatures.length" class="apple-card p-20 flex flex-col items-center justify-center">
           <Loader2 :size="40" class="animate-spin text-apple-blue mb-4" />
           <p class="text-sm font-bold text-apple-text">正在深挖 PubMed 数据库...</p>
         </div>
@@ -215,9 +386,9 @@ onBeforeUnmount(() => {
             <div
               v-for="item in orderedLiteratures"
               :key="item.relationId || `${item.id}-${item.matchedEnzymeAccession}`"
-              class="apple-card p-6 group hover:border-apple-blue/30 transition-all flex gap-6"
+              class="apple-card p-6 group transition-all flex gap-6 hover:shadow-[0_24px_58px_-44px_rgba(56,189,248,0.18)]"
             >
-              <div class="hidden md:flex flex-col items-center justify-center w-20 h-20 rounded-apple bg-apple-background border border-apple-border shrink-0">
+              <div class="hidden md:flex flex-col items-center justify-center w-20 h-20 rounded-apple bg-apple-background/38 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] shrink-0">
                 <span class="text-[10px] font-bold text-apple-secondary-text uppercase">得分</span>
                 <span class="text-2xl font-bold text-apple-blue">{{ item.confidenceScore || 0 }}</span>
               </div>
@@ -276,7 +447,7 @@ onBeforeUnmount(() => {
                   {{ item.title }}
                 </h3>
 
-                <div class="p-4 rounded-apple bg-apple-blue/5 border border-apple-blue/10 space-y-2">
+                <div class="p-4 rounded-apple bg-apple-blue/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.02)] space-y-2">
                   <div class="flex items-center gap-2 text-[10px] font-bold text-apple-blue uppercase tracking-widest">
                     <Sparkles :size="12" />
                     关联证据

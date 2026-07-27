@@ -11,12 +11,17 @@ export default {
     extend: {
       colors: {
         apple: {
-          blue: '#007AFF',
-          green: '#34C759',
-          gray: '#8E8E93',
-          'light-gray': '#F2F2F7',
-          'dark-gray': '#1C1C1E',
-          background: '#F5F5F7',
+          blue: 'rgb(var(--apple-blue-rgb) / <alpha-value>)',
+          green: 'rgb(var(--apple-green-rgb) / <alpha-value>)',
+          gray: 'rgb(var(--apple-secondary-text-rgb) / <alpha-value>)',
+          text: 'rgb(var(--apple-text-rgb) / <alpha-value>)',
+          'secondary-text': 'rgb(var(--apple-secondary-text-rgb) / <alpha-value>)',
+          border: 'rgb(var(--apple-border-rgb) / <alpha-value>)',
+          background: 'rgb(var(--apple-background-rgb) / <alpha-value>)',
+          card: 'rgb(var(--apple-card-rgb) / <alpha-value>)',
+          surface: 'rgb(var(--apple-surface-rgb) / <alpha-value>)',
+          'light-gray': 'rgb(var(--apple-surface-rgb) / <alpha-value>)',
+          'dark-gray': 'rgb(var(--apple-dark-gray-rgb) / <alpha-value>)',
         }
       },
       borderRadius: {
@@ -25,9 +30,9 @@ export default {
         'apple-xl': '24px',
       },
       boxShadow: {
-        'apple': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-        'apple-hover': '0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04)',
-        'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
+        'apple': '0 16px 38px -24px rgba(9, 9, 11, 0.26), 0 10px 24px -18px rgba(14, 165, 233, 0.12)',
+        'apple-hover': '0 22px 54px -28px rgba(9, 9, 11, 0.3), 0 16px 34px -24px rgba(45, 212, 191, 0.11)',
+        'glass': '0 24px 72px -48px rgba(9, 9, 11, 0.4)',
       },
       fontFamily: {
         sans: [
