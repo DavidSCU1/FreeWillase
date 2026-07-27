@@ -69,11 +69,17 @@ const routes: RouteRecordRaw[] = [
     path: '/prediction/minifold',
     name: 'prediction-minifold',
     component: MiniFoldPage,
+    meta: {
+      aiConfigProvider: 'minifold',
+    },
   },
   {
     path: '/prediction/nvidia',
     name: 'prediction-nvidia',
     component: NvidiaFoldPage,
+    meta: {
+      aiConfigProvider: 'nvidia',
+    },
   },
   {
     path: '/prediction/trrosettarna',

@@ -19,6 +19,7 @@ import {
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { usePredictionStore } from '@/stores/prediction'
+import { useAiConfigStore } from '@/stores/aiConfig'
 import { saveCloudPredictionEnzyme, getEnzymeSequence } from '@/utils/api'
 import type { EnzymeEntry, PredictionProvider, PredictionTask } from '@/types'
 
@@ -29,6 +30,7 @@ const props = defineProps<{
 const router = useRouter()
 const route = useRoute()
 const store = usePredictionStore()
+const aiConfigStore = useAiConfigStore()
 
 // --- Save to Library Refs ---
 const libraryEntryName = ref('')
@@ -49,10 +51,10 @@ const providerMeta = computed(() => {
       typeLabel: 'RNA',
       modeLabel: '单条',
       modelLabel: 'trRosettaRNA',
-      needsApiKey: false,
       apiHint: '通过系统后端模拟 HttpClient 请求，无需 API Key，但受上游网站限流影响。',
       resultLabel: '三维结构结果',
       summarySuffix: 'nt',
+      workspaceConfigProvider: null,
     }
   }
 
@@ -67,11 +69,16 @@ const providerMeta = computed(() => {
     typeLabel: 'protein',
     modeLabel: '单条',
     modelLabel: 'esmfold',
-    needsApiKey: true,
-    apiHint: '需要有效的 NVIDIA API Key，可选自定义 Base URL。',
+    apiHint: '首次进入页面时会询问并保存到当前账号的私有 env 文件，后续自动复用。',
     resultLabel: '三维结构结果',
     summarySuffix: 'aa',
+    workspaceConfigProvider: 'nvidia',
   }
+})
+
+const credentialReady = computed(() => {
+  if (!providerMeta.value.workspaceConfigProvider) return true
+  return aiConfigStore.status?.[providerMeta.value.workspaceConfigProvider]?.configured ?? false
 })
 
 const providerTasks = computed(() => store.tasks.filter(task => task.provider === props.provider))
@@ -99,9 +106,9 @@ const readinessItems = computed(() => [
   },
   {
     label: '访问凭证',
-    done: !providerMeta.value.needsApiKey || !!store.apiKey.trim(),
-    hint: providerMeta.value.needsApiKey
-      ? (store.apiKey.trim() ? '已填写 API Key' : '需要 API Key')
+    done: credentialReady.value,
+    hint: providerMeta.value.workspaceConfigProvider
+      ? (credentialReady.value ? '已连接当前账号私有配置' : '进入页面时会提示填写')
       : '无需 API Key',
   },
   {
@@ -417,33 +424,20 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="providerMeta.needsApiKey" class="mt-6 pt-6 border-t border-white/[0.04] space-y-4">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">访问密钥 / Token</label>
-                <input
-                  v-model="store.apiKey"
-                  type="password"
-                  class="apple-input text-xs"
-                  placeholder="请输入您的 API 密钥..."
-                >
-              </div>
-              <div class="space-y-2">
-                <label class="text-[10px] font-bold text-apple-secondary-text uppercase tracking-widest ml-1">接口地址（可选）</label>
-                <input
-                  v-model="store.baseUrl"
-                  type="text"
-                  class="apple-input text-xs"
-                  placeholder="默认：https://health.api.nvidia.com"
-                >
-              </div>
-            </div>
-            <p class="text-[11px] text-apple-secondary-text">{{ providerMeta.apiHint }}</p>
-          </div>
-
-          <div v-else class="mt-6 pt-6 border-t border-white/[0.04]">
+          <div class="mt-6 pt-6 border-t border-white/[0.04]">
             <div class="rounded-apple bg-apple-background/28 p-4 text-[11px] leading-relaxed text-apple-secondary-text shadow-[inset_0_1px_0_rgba(148,163,184,0.02)]">
-              {{ providerMeta.apiHint }}
+              <template v-if="providerMeta.workspaceConfigProvider">
+                <p>{{ providerMeta.apiHint }}</p>
+                <p class="mt-2">
+                  当前状态：
+                  <span class="font-bold" :class="credentialReady ? 'text-emerald-300' : 'text-amber-300'">
+                    {{ credentialReady ? '已配置' : '待补充' }}
+                  </span>
+                </p>
+              </template>
+              <template v-else>
+                {{ providerMeta.apiHint }}
+              </template>
             </div>
           </div>
         </div>

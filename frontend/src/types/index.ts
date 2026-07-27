@@ -109,6 +109,7 @@ export interface LiteratureScanStatus {
 }
 
 export type PredictionProvider = 'nvidia' | 'minifold' | 'trrosettarna'
+export type AiConfigProvider = 'minifold' | 'nvidia'
 
 export type MoleculeType = 'protein' | 'RNA' | 'DNA'
 
@@ -153,4 +154,18 @@ export interface PredictionTask {
   sequenceLength?: number
   error?: string
   result?: PredictionResult
+}
+
+export interface AiProviderConfigStatus {
+  configured: boolean
+  userScopedFilePresent: boolean
+  requiredKeys: string[]
+  optionalKeys: string[]
+  configuredKeys: string[]
+  missingKeys: string[]
+}
+
+export interface UserAiConfigStatusResponse {
+  minifold: AiProviderConfigStatus
+  nvidia: AiProviderConfigStatus
 }

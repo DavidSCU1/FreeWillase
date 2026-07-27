@@ -23,6 +23,7 @@ import {
 } from 'lucide-vue-next'
 import StructureViewer from '@/components/StructureViewer.vue'
 import { useMiniFoldStore } from '@/stores/minifold'
+import { useAiConfigStore } from '@/stores/aiConfig'
 import type { MiniFoldBackend } from '@/stores/minifold'
 import { normalizeSequenceInput } from '@/utils/predictionProviders'
 import { getMiniFoldLogs, saveMiniFoldEnzyme } from '@/utils/api'
@@ -30,6 +31,7 @@ import type { EnzymeEntry } from '@/types'
 
 const router = useRouter()
 const store = useMiniFoldStore()
+const aiConfigStore = useAiConfigStore()
 const showFullscreenViewer = ref(false)
 const libraryEntryName = ref('')
 const isSavingToLibrary = ref(false)
@@ -98,6 +100,7 @@ const normalizedSequenceLength = computed(() => {
     .length
 })
 const envLength = computed(() => store.envText.trim().length)
+const arkConfigReady = computed(() => aiConfigStore.status?.minifold?.configured ?? false)
 const summaryItems = computed(() => [
   {
     label: '序列长度',
@@ -544,6 +547,13 @@ onUnmounted(() => {
       </div>
 
       <div class="flex items-center gap-3">
+        <span
+          class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold"
+          :class="arkConfigReady ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'"
+        >
+          <Sparkles :size="12" />
+          {{ arkConfigReady ? 'ARK 已配置' : 'ARK 待配置' }}
+        </span>
         <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold" :class="statusMeta.chipClass">
           <Activity v-if="store.status === 'running'" class="animate-pulse" :size="12" />
           <CheckCircle2 v-else-if="store.status === 'success'" :size="12" />

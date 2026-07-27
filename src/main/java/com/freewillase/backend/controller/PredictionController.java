@@ -5,6 +5,8 @@ import com.freewillase.backend.service.PredictionService;
 import com.freewillase.backend.service.TrRosettaRnaService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -17,7 +19,7 @@ public class PredictionController {
     private final TrRosettaRnaService trRosettaRnaService;
 
     @PostMapping("/minifold")
-    public MiniFoldPredictionResponse predict(@RequestBody MiniFoldPredictionRequest request) {
+    public MiniFoldPredictionResponse predict(@RequestBody MiniFoldPredictionRequest request, Authentication authentication) {
         log.info("MiniFold request received: sequenceLength={}, targetChains={}, useIgpu={}, backend={}, condaEnvName={}",
                 request.getSequence() != null ? request.getSequence().length() : 0,
                 request.getTargetChains(),
@@ -27,7 +29,12 @@ public class PredictionController {
         if (request.getSequence() == null || request.getSequence().isEmpty()) {
             throw new IllegalArgumentException("序列不能为空");
         }
-        return predictionService.predictWithMiniFold(request);
+        return predictionService.predictWithMiniFold(request, authentication.getName());
+    }
+
+    @PostMapping("/nvidia/esmfold")
+    public ResponseEntity<String> predictNvidia(@RequestBody NvidiaPredictionRequest request, Authentication authentication) {
+        return predictionService.predictWithNvidia(request, authentication.getName());
     }
 
     @PostMapping("/trrosettarna")

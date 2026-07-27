@@ -1,4 +1,13 @@
-import type { EnzymeAnnotation, EnzymeAnnotationType, EnzymeEntry, ImportTask, LiteratureRecord, LiteratureScanStatus } from '@/types'
+import type {
+  EnzymeAnnotation,
+  EnzymeAnnotationType,
+  EnzymeEntry,
+  ImportTask,
+  LiteratureRecord,
+  LiteratureScanStatus,
+  UserAiConfigStatusResponse,
+  AiConfigProvider,
+} from '@/types'
 
 interface ImportRequest {
   taskName: string
@@ -369,6 +378,13 @@ export function predictTrRosettaRna(payload: { name: string, sequence: string, e
   })
 }
 
+export function predictNvidiaEsmfold(payload: { sequence: string }) {
+  return request<any>('/api/prediction/nvidia/esmfold', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function getTrRosettaRnaResult(taskId: string) {
   return request<any>(`/api/prediction/trrosettarna/result/${taskId}`, {
     method: 'GET',
@@ -388,4 +404,19 @@ export function getMiniFoldLogs(taskId: string) {
 
 export function getMiniFoldResult(taskId: string) {
   return request<any>(`/api/prediction/minifold/result/${taskId}`)
+}
+
+export function getUserAiConfigStatus() {
+  return request<UserAiConfigStatusResponse>('/api/user-ai-config/status')
+}
+
+export function saveUserAiConfig(payload: {
+  provider: AiConfigProvider
+  apiKey: string
+  baseUrl?: string
+}) {
+  return request<UserAiConfigStatusResponse>('/api/user-ai-config', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
 }

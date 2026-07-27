@@ -1,5 +1,5 @@
 import type { MoleculeType, PredictionConfig, PredictionRequest, PredictionResult } from '@/types'
-import { predictMiniFold, predictTrRosettaRna } from '@/utils/api'
+import { predictMiniFold, predictNvidiaEsmfold, predictTrRosettaRna } from '@/utils/api'
 
 export interface ParsedSequenceRecord {
   name: string
@@ -60,7 +60,7 @@ function pickBaseUrl(config: PredictionConfig): string {
 }
 
 function assertApiKey(config: PredictionConfig) {
-  if (config.provider === 'trrosettarna') return
+  if (config.provider === 'trrosettarna' || config.provider === 'nvidia') return
   if (!config.apiKey?.trim()) throw new Error('请先填写 API Key')
 }
 
@@ -261,16 +261,10 @@ export async function predictStructure(config: PredictionConfig, request: Predic
       throw new Error('NVIDIA ESMFold 当前仅支持单条序列预测。请切换为单条模式后重试。')
     }
 
-    const baseUrl = pickBaseUrl(config)
-    const text = await requestWithGuidance(config.provider, `${baseUrl}/v1/biology/nvidia/esmfold`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.apiKey.trim()}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({ sequence: normalizedSequence }),
+    const body = await predictNvidiaEsmfold({
+      sequence: normalizedSequence || '',
     })
+    const text = typeof body === 'string' ? body : JSON.stringify(body)
 
     if (looksLikeJson(text)) {
       const body = JSON.parse(text) as {

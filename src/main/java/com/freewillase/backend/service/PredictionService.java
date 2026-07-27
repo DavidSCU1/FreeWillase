@@ -3,9 +3,17 @@ package com.freewillase.backend.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.freewillase.backend.dto.MiniFoldPredictionRequest;
 import com.freewillase.backend.dto.MiniFoldPredictionResponse;
+import com.freewillase.backend.dto.NvidiaPredictionRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -24,10 +32,13 @@ import java.util.UUID;
 public class PredictionService {
 
     private static final String BOOST_MANAGED_PYTHON = "D:\\Program Files (x86)\\Boost\\python.exe";
+    private static final String NVIDIA_DEFAULT_BASE_URL = "https://health.api.nvidia.com";
 
     private final ObjectMapper objectMapper;
+    private final RestTemplate restTemplate;
+    private final UserAiConfigService userAiConfigService;
 
-    public MiniFoldPredictionResponse predictWithMiniFold(MiniFoldPredictionRequest request) {
+    public MiniFoldPredictionResponse predictWithMiniFold(MiniFoldPredictionRequest request, String username) {
         String taskId = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         Path taskDir = getTaskDir(taskId);
 
@@ -64,6 +75,8 @@ public class PredictionService {
             builder.redirectOutput(launchLog.toFile());
             builder.environment().put("PYTHONIOENCODING", "utf-8");
             builder.environment().put("PYTHONUTF8", "1");
+            userAiConfigService.resolveUserEnvFile(username)
+                    .ifPresent(path -> builder.environment().put("FREEWILLASE_USER_ENV_FILE", path.toString()));
 
             builder.start();
 
@@ -74,6 +87,46 @@ public class PredictionService {
         } catch (Exception e) {
             log.error("Failed to start embedded MiniFold task {}", taskId, e);
             throw new RuntimeException("无法启动项目内置 MiniFold 进程: " + e.getMessage(), e);
+        }
+    }
+
+    public ResponseEntity<String> predictWithNvidia(NvidiaPredictionRequest request, String username) {
+        String sequence = defaultString(request.getSequence()).trim();
+        if (sequence.isEmpty()) {
+            throw new IllegalArgumentException("序列不能为空");
+        }
+
+        String apiKey = userAiConfigService.resolveProviderValue(username, "NVIDIA_API_KEY")
+                .orElseThrow(() -> new IllegalArgumentException("当前账号尚未配置 NVIDIA API Key，请先在页面弹窗中填写"));
+        String baseUrl = userAiConfigService.resolveProviderValue(username, "NVIDIA_API_URL")
+                .orElse(NVIDIA_DEFAULT_BASE_URL);
+        String endpoint = trimTrailingSlash(baseUrl) + "/v1/biology/nvidia/esmfold";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(apiKey);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN, MediaType.ALL));
+
+        Map<String, String> payload = Map.of("sequence", sequence);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    endpoint,
+                    HttpMethod.POST,
+                    new HttpEntity<>(payload, headers),
+                    String.class
+            );
+
+            MediaType contentType = response.getHeaders().getContentType();
+            return ResponseEntity.status(response.getStatusCode())
+                    .contentType(contentType != null ? contentType : MediaType.TEXT_PLAIN)
+                    .body(response.getBody());
+        } catch (HttpStatusCodeException e) {
+            String detail = e.getResponseBodyAsString(StandardCharsets.UTF_8).trim();
+            String message = detail.isEmpty()
+                    ? "NVIDIA ESMFold 请求失败: " + e.getStatusCode().value()
+                    : "NVIDIA ESMFold 请求失败: " + detail;
+            throw new IllegalArgumentException(message);
         }
     }
 
@@ -320,5 +373,13 @@ public class PredictionService {
             return value.substring(1, value.length() - 1).trim();
         }
         return value;
+    }
+
+    private String trimTrailingSlash(String value) {
+        String normalized = defaultString(value).trim();
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 }

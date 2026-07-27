@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   LayoutDashboard,
@@ -16,13 +16,17 @@ import { useAuth } from '@/utils/auth'
 import BrandMark from '@/components/BrandMark.vue'
 import OpeningSequence from '@/components/OpeningSequence.vue'
 import BrandPuzzleOverlay from '@/components/BrandPuzzleOverlay.vue'
+import UserAiConfigPrompt from '@/components/UserAiConfigPrompt.vue'
 import { useBrandPuzzleGate } from '@/composables/useBrandPuzzleGate'
+import { useAiConfigStore } from '@/stores/aiConfig'
+import type { AiConfigProvider } from '@/types'
 
 const route = useRoute()
 const { logout } = useAuth()
 const SIDEBAR_STORAGE_KEY = 'appSidebarCollapsed'
 const isSidebarCollapsed = ref(false)
 const { isPuzzleGateVisible, markOpeningFinished, unlockBrandPuzzle } = useBrandPuzzleGate()
+const aiConfigStore = useAiConfigStore()
 
 const navItems = [
   { label: '工作台', to: '/dashboard', icon: LayoutDashboard },
@@ -45,6 +49,11 @@ function toggleSidebar() {
 onMounted(() => {
   isSidebarCollapsed.value = localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1'
 })
+
+watch(() => route.fullPath, async () => {
+  const provider = route.meta.aiConfigProvider as AiConfigProvider | undefined
+  await aiConfigStore.ensurePromptForRoute(provider, route.fullPath)
+}, { immediate: true })
 </script>
 
 <template>
@@ -53,6 +62,7 @@ onMounted(() => {
     <transition name="brand-puzzle-gate" appear>
       <BrandPuzzleOverlay v-if="showPuzzleGate" @solved="unlockBrandPuzzle" />
     </transition>
+    <UserAiConfigPrompt />
     <div class="pointer-events-none absolute inset-0 resn-shell-grid"></div>
     <div class="pointer-events-none absolute inset-x-0 top-0 h-96 bg-[radial-gradient(circle_at_top,rgba(92,199,245,0.1),transparent_48%)]"></div>
     <div class="pointer-events-none absolute left-[-10rem] top-20 h-[22rem] w-[22rem] rounded-full bg-apple-blue/[0.08] blur-3xl"></div>

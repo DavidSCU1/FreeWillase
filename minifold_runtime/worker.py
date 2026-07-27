@@ -80,6 +80,16 @@ def run_task(task_dir: Path, payload: dict):
                 except Exception as exc:
                     logger(f"Environment load failed for {env_path}: {exc}")
 
+    user_env_file = os.environ.get("FREEWILLASE_USER_ENV_FILE", "").strip()
+    if user_env_file:
+        try:
+            load_env(user_env_file)
+            # Ark URL is fixed by the project runtime; ignore any legacy user override.
+            os.environ.pop("ARK_API_URL", None)
+            logger(f"Loaded user environment file: {user_env_file}")
+        except Exception as exc:
+            logger(f"User environment load failed for {user_env_file}: {exc}")
+
     sequence = (payload.get("sequence") or "").strip()
     if not sequence:
         raise ValueError("Missing protein sequence")
