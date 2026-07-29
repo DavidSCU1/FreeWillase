@@ -16,6 +16,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * 用户级 AI 配置服务（按账号隔离）。
+ *
+ * <p>核心目标：</p>
+ * <ul>
+ *   <li>不同用户可以在同一套部署里配置自己的 NVIDIA API Key / URL，不互相影响。</li>
+ *   <li>MiniFold（Ark）同样按用户保存 Key，但 URL 由运行时固定，不允许用户覆盖。</li>
+ * </ul>
+ *
+ * <p>存储方式：</p>
+ * <ul>
+ *   <li>写入项目目录下的 <code>.freewillase/user-env/&lt;username&gt;.env.local</code>（非 Git 版本文件）。</li>
+ *   <li>读取优先级：用户私有文件 &gt; 系统环境变量。</li>
+ * </ul>
+ */
 @Service
 public class UserAiConfigService {
 
@@ -26,6 +41,9 @@ public class UserAiConfigService {
     private static final String NVIDIA_API_KEY = "NVIDIA_API_KEY";
     private static final String NVIDIA_API_URL = "NVIDIA_API_URL";
 
+    /**
+     * 返回当前用户各 provider 的配置状态，用于前端判断是否需要弹窗提示填写。
+     */
     public UserAiConfigStatusResponse getStatus(String username) {
         return UserAiConfigStatusResponse.builder()
                 .minifold(buildProviderStatus(username, PROVIDER_MINIFOLD))
@@ -33,38 +51,62 @@ public class UserAiConfigService {
                 .build();
     }
 
+    /**
+     * 保存当前用户的 AI 配置（API Key / 可选 baseUrl）。
+     *
+     * <p>注意：这里不会把 key 写入数据库，而是写入用户私有 env 文件。</p>
+     */
     public UserAiConfigStatusResponse save(String username, UserAiConfigSaveRequest request) {
+        // provider 标准化：只允许 minifold / nvidia
         String provider = normalizeProvider(request.getProvider());
         if (request.getApiKey() == null || request.getApiKey().trim().isEmpty()) {
             throw new IllegalArgumentException("请先填写 API Key");
         }
 
+        // updates 表示本次要写入/删除的键值对，最终会合并到用户的 env 文件中
         Map<String, String> updates = new LinkedHashMap<>();
         if (PROVIDER_MINIFOLD.equals(provider)) {
+            // MiniFold 走 Ark：只需要保存 ARK_API_KEY
             updates.put(ARK_API_KEY, sanitizeEnvValue(request.getApiKey()));
-            // Ark URL is fixed by the project runtime, so we explicitly remove any user override.
+            // Ark URL 由项目运行时固定，不允许用户覆盖；因此显式删除用户可能写入的 ARK_API_URL
             updates.put(ARK_API_URL, null);
         } else {
+            // NVIDIA：保存 Key，并允许用户可选覆盖 baseUrl（例如代理/内网转发）
             updates.put(NVIDIA_API_KEY, sanitizeEnvValue(request.getApiKey()));
             updates.put(NVIDIA_API_URL, sanitizeOptionalEnvValue(request.getBaseUrl()));
         }
 
+        // 写入用户私有 env 文件
         writeUserEnv(username, updates);
+        // 保存成功后返回最新状态，方便前端立即刷新“已配置/未配置”的展示
         return getStatus(username);
     }
 
+    /**
+     * 读取某个配置项的值。
+     *
+     * <p>优先级：用户私有 env 文件 &gt; 系统环境变量。</p>
+     * <p>特殊规则：ARK_API_URL 只允许从系统环境变量读取（避免用户绕过固定 URL 约束）。</p>
+     */
     public Optional<String> resolveProviderValue(String username, String key) {
         if (ARK_API_URL.equals(key)) {
             return Optional.ofNullable(trimToNull(System.getenv(key)));
         }
+        // 先读用户私有文件
         Map<String, String> userValues = readUserEnv(username);
         String userValue = trimToNull(userValues.get(key));
         if (userValue != null) {
             return Optional.of(userValue);
         }
+        // 再读系统环境变量（用于服务端统一配置的兜底）
         return Optional.ofNullable(trimToNull(System.getenv(key)));
     }
 
+    /**
+     * 返回当前用户私有 env 文件路径（如果存在）。
+     *
+     * <p>用途：例如在启动 MiniFold Python 子进程时，将该路径通过环境变量传给 worker。</p>
+     */
     public Optional<Path> resolveUserEnvFile(String username) {
         Path path = getUserEnvFile(username);
         return Files.exists(path) ? Optional.of(path) : Optional.empty();
@@ -103,9 +145,11 @@ public class UserAiConfigService {
     private void writeUserEnv(String username, Map<String, String> updates) {
         try {
             Path envDir = getUserEnvRoot();
+            // 确保目录存在：.freewillase/user-env
             Files.createDirectories(envDir);
 
             Path envFile = getUserEnvFile(username);
+            // 合并“已有配置 + 本次 updates”，并支持通过 value=null 来删除某个 key
             Map<String, String> next = new LinkedHashMap<>(readUserEnv(username));
             for (Map.Entry<String, String> entry : updates.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isBlank()) {
@@ -119,6 +163,7 @@ public class UserAiConfigService {
             lines.add("# FreeWillase per-user AI config");
             lines.add("# This file is generated and updated by the application.");
             for (Map.Entry<String, String> entry : next.entrySet()) {
+                // 写成 KEY=VALUE 形式；必要时对 value 加引号（包含空格/# 的情况）
                 lines.add(entry.getKey() + "=" + quoteIfNeeded(entry.getValue()));
             }
             Files.write(envFile, lines, StandardCharsets.UTF_8);
@@ -135,6 +180,7 @@ public class UserAiConfigService {
         }
 
         try {
+            // 逐行解析 env 文件，忽略空行、注释行，允许 VALUE 使用单双引号包裹
             for (String rawLine : Files.readAllLines(envFile, StandardCharsets.UTF_8)) {
                 String line = rawLine == null ? "" : rawLine.trim();
                 if (line.isEmpty() || line.startsWith("#") || !line.contains("=")) {
@@ -175,6 +221,7 @@ public class UserAiConfigService {
         if (normalized == null) {
             return "anonymous";
         }
+        // 防止用户名中出现路径分隔符等非法字符，避免写文件时路径穿越
         return normalized.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 

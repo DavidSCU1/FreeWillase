@@ -26,6 +26,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * 预测业务编排层。
+ *
+ * <p>这个类承担两类职责：</p>
+ * <ul>
+ *   <li>本地任务：MiniFold 通过启动项目内置的 Python worker 执行，结果落盘（taskDir），前端通过轮询读取日志/结果。</li>
+ *   <li>云端任务：NVIDIA ESMFold 通过 RestTemplate 调上游接口，直接把响应透传给前端。</li>
+ * </ul>
+ *
+ * <p>注意：API Key 等敏感信息不会写入日志，读取来源为“用户私有 env 文件 > 系统环境变量”。</p>
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -38,7 +49,18 @@ public class PredictionService {
     private final RestTemplate restTemplate;
     private final UserAiConfigService userAiConfigService;
 
+    /**
+     * 提交项目内置 MiniFold 预测任务。
+     *
+     * <p>实现要点：</p>
+     * <ul>
+     *   <li>为每次提交生成 taskId，对应一个独立 taskDir（避免任务间互相覆盖）。</li>
+     *   <li>将请求参数序列化为 request.json（便于复现与排查）。</li>
+     *   <li>拼出 Python worker 命令并异步启动，日志输出到 launcher.log。</li>
+     * </ul>
+     */
     public MiniFoldPredictionResponse predictWithMiniFold(MiniFoldPredictionRequest request, String username) {
+        // taskId 用于前端轮询、文件落盘目录名，以及日志/结果的唯一定位
         String taskId = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         Path taskDir = getTaskDir(taskId);
 
@@ -52,12 +74,17 @@ public class PredictionService {
                 request.getEnvText());
 
         try {
+            // 1) 创建任务目录：minifold_runtime/tasks/<taskId>
             Files.createDirectories(taskDir);
+            // 2) 构建 worker 需要的 payload（用于 Python 侧读取）
             Map<String, Object> payload = buildPayload(request);
             Path payloadPath = taskDir.resolve("request.json");
+            // 3) 将 payload 落盘，方便之后定位问题（例如参数是否被错误传递）
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(payloadPath.toFile(), payload);
 
+            // 4) 分子类型决定使用哪个 worker（蛋白 worker.py / RNA worker_rna.py）
             String moleculeType = defaultString(request.getMoleculeType(), "protein");
+            // 5) 解析 Python 启动方式：支持用户指定 python.exe、conda env、环境变量 MINIFOLD_PYTHON、或自动探测
             List<String> command = new ArrayList<>(resolvePythonCommand(request));
             command.add("-u");
             command.add(getWorkerScript(moleculeType).toString());
@@ -68,16 +95,20 @@ public class PredictionService {
 
             log.info("Launching MiniFold command for task {}: {}", taskId, command);
 
+            // 6) 启动子进程并将 stdout/stderr 合并重定向到 launcher.log（避免控制台被占用，也便于前端轮询）
             Path launchLog = taskDir.resolve("launcher.log");
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(getProjectRoot().toFile());
             builder.redirectErrorStream(true);
             builder.redirectOutput(launchLog.toFile());
+            // 7) 确保 Python 输出编码为 UTF-8，避免 Windows 下日志乱码
             builder.environment().put("PYTHONIOENCODING", "utf-8");
             builder.environment().put("PYTHONUTF8", "1");
+            // 8) 将当前用户的私有 env 文件路径传给 Python（实现按用户隔离的 Ark/NVIDIA 等配置读取）
             userAiConfigService.resolveUserEnvFile(username)
                     .ifPresent(path -> builder.environment().put("FREEWILLASE_USER_ENV_FILE", path.toString()));
 
+            // 9) 异步启动，不阻塞 HTTP 请求线程；结果由 Python 写回 result.json，前端轮询读取
             builder.start();
 
             return MiniFoldPredictionResponse.builder()
@@ -90,26 +121,39 @@ public class PredictionService {
         }
     }
 
+    /**
+     * 调用 NVIDIA ESMFold 进行蛋白结构预测。
+     *
+     * <p>交互模型：同步请求，直接返回 NVIDIA 的响应 body（可能是 JSON，也可能是纯文本 PDB）。</p>
+     * <p>这里选择 ResponseEntity&lt;String&gt; 是为了保留上游的 Content-Type，便于前端区分解析策略。</p>
+     */
     public ResponseEntity<String> predictWithNvidia(NvidiaPredictionRequest request, String username) {
+        // 前端可能传入 FASTA/Plain，后端这里只做最小规范化：去除两端空白
         String sequence = defaultString(request.getSequence()).trim();
         if (sequence.isEmpty()) {
             throw new IllegalArgumentException("序列不能为空");
         }
 
+        // NVIDIA 凭证按用户读取：优先用户私有 env 文件，其次系统环境变量
         String apiKey = userAiConfigService.resolveProviderValue(username, "NVIDIA_API_KEY")
                 .orElseThrow(() -> new IllegalArgumentException("当前账号尚未配置 NVIDIA API Key，请先在页面弹窗中填写"));
+        // baseUrl 允许用户覆盖（例如企业内网转发或代理），未配置则使用默认 NVIDIA health api
         String baseUrl = userAiConfigService.resolveProviderValue(username, "NVIDIA_API_URL")
                 .orElse(NVIDIA_DEFAULT_BASE_URL);
+        // endpoint 拼接时避免双斜杠：trimTrailingSlash 统一把 baseUrl 尾部的 / 去掉
         String endpoint = trimTrailingSlash(baseUrl) + "/v1/biology/nvidia/esmfold";
 
         HttpHeaders headers = new HttpHeaders();
+        // Bearer token 不写入日志；这里只设置 header
         headers.setBearerAuth(apiKey);
         headers.setContentType(MediaType.APPLICATION_JSON);
+        // Accept 同时允许 JSON / 纯文本 / 任意：兼容 NVIDIA 不同返回格式
         headers.setAccept(List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN, MediaType.ALL));
 
         Map<String, String> payload = Map.of("sequence", sequence);
 
         try {
+            // 通过 RestTemplate 直接请求上游 NVIDIA 服务
             ResponseEntity<String> response = restTemplate.exchange(
                     endpoint,
                     HttpMethod.POST,
@@ -117,19 +161,27 @@ public class PredictionService {
                     String.class
             );
 
+            // Content-Type 透传给前端：前端可根据 Content-Type 或 body 形态决定 JSON/PDB 的解析策略
             MediaType contentType = response.getHeaders().getContentType();
             return ResponseEntity.status(response.getStatusCode())
                     .contentType(contentType != null ? contentType : MediaType.TEXT_PLAIN)
                     .body(response.getBody());
         } catch (HttpStatusCodeException e) {
+            // 上游返回非 2xx 时，尽量把响应 body 带回给用户（通常包含更可读的失败原因）
             String detail = e.getResponseBodyAsString(StandardCharsets.UTF_8).trim();
             String message = detail.isEmpty()
                     ? "NVIDIA ESMFold 请求失败: " + e.getStatusCode().value()
                     : "NVIDIA ESMFold 请求失败: " + detail;
+            // 抛 IllegalArgumentException 让统一异常处理返回 400，并在前端工作台直接展示 message
             throw new IllegalArgumentException(message);
         }
     }
 
+    /**
+     * 读取 MiniFold 任务日志（用于前端轮询展示）。
+     *
+     * <p>优先返回 process.log（worker 输出），其次返回 launcher.log（启动器输出）。</p>
+     */
     public String getMiniFoldLogs(String taskId) {
         try {
             Path taskDir = getTaskDir(taskId);
@@ -154,6 +206,11 @@ public class PredictionService {
         }
     }
 
+    /**
+     * 读取 MiniFold 任务结果（用于前端轮询）。
+     *
+     * <p>Python worker 完成后会在 taskDir 写入 result.json；未生成则视为仍在运行。</p>
+     */
     public MiniFoldPredictionResponse getMiniFoldResult(String taskId) {
         try {
             Path taskDir = getTaskDir(taskId);
